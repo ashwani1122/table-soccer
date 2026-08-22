@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { Socket } from "socket.io-client";
 import styles from "./FlickFootball.module.css";
 
 const WIDTH = 420;
@@ -49,6 +50,7 @@ type Game = {
   lastShooterId: string | null;
   carrierId: string | null;
   carrierOffset: { x: number; y: number } | null;
+  carrierTargetOffset: { x: number; y: number } | null;
   caughtThisMove: boolean;
   goalResetAt: number | null;
   message: string;
@@ -63,6 +65,28 @@ type Hud = {
   turnTime: number;
   message: string;
   winner: Team | null;
+};
+
+type OnlineStage = "menu" | "searching" | "matched" | "practice" | "disconnected";
+
+type MatchInfo = {
+  matchId: string;
+  myTeam: Team;
+  player: { name: string; team: Team };
+  opponent: { name: string; team: Team };
+  startsAt: number;
+};
+
+type Shot = {
+  bodyId: string;
+  dirX: number;
+  dirY: number;
+  pull: number;
+};
+
+type GameSnapshot = Omit<Game, "drag" | "goalResetAt"> & {
+  drag: null;
+  goalResetAt: number | null;
 };
 
 const TEAM_META = {
@@ -105,6 +129,7 @@ function makeGame(): Game {
     lastShooterId: null,
     carrierId: null,
     carrierOffset: null,
+    carrierTargetOffset: null,
     caughtThisMove: false,
     goalResetAt: null,
     message: "YOUR TURN",
@@ -130,6 +155,88 @@ function clamp(value: number, min: number, max: number) {
 
 function speed(body: Body) {
   return Math.hypot(body.vx, body.vy);
+}
+
+function rotateToward(
+  current: { x: number; y: number },
+  target: { x: number; y: number },
+  maxRadians: number,
+) {
+  const currentAngle = Math.atan2(current.y, current.x);
+  const targetAngle = Math.atan2(target.y, target.x);
+  const delta = Math.atan2(
+    Math.sin(targetAngle - currentAngle),
+    Math.cos(targetAngle - currentAngle),
+  );
+  if (Math.abs(delta) <= maxRadians) return { ...target };
+  const angle = currentAngle + Math.sign(delta) * maxRadians;
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+}
+
+function constrainPlayerToPitch(body: Body) {
+  if (body.x - body.radius < FIELD.left) {
+    body.x = FIELD.left + body.radius;
+    if (body.vx < 0) body.vx = Math.abs(body.vx) * 0.84;
+  } else if (body.x + body.radius > FIELD.right) {
+    body.x = FIELD.right - body.radius;
+    if (body.vx > 0) body.vx = -Math.abs(body.vx) * 0.84;
+  }
+  if (body.y - body.radius < FIELD.top) {
+    body.y = FIELD.top + body.radius;
+    if (body.vy < 0) body.vy = Math.abs(body.vy) * 0.84;
+  } else if (body.y + body.radius > FIELD.bottom) {
+    body.y = FIELD.bottom - body.radius;
+    if (body.vy > 0) body.vy = -Math.abs(body.vy) * 0.84;
+  }
+}
+
+function constrainFreeBallToPitch(ball: Body) {
+  if (ball.x - ball.radius < FIELD.left) {
+    ball.x = FIELD.left + ball.radius;
+    if (ball.vx < 0) ball.vx = Math.abs(ball.vx) * 0.88;
+  } else if (ball.x + ball.radius > FIELD.right) {
+    ball.x = FIELD.right - ball.radius;
+    if (ball.vx > 0) ball.vx = -Math.abs(ball.vx) * 0.88;
+  }
+  const insideGoalMouth = ball.x > GOAL_LEFT && ball.x < GOAL_RIGHT;
+  if (!insideGoalMouth && ball.y - ball.radius < FIELD.top) {
+    ball.y = FIELD.top + ball.radius;
+    if (ball.vy < 0) ball.vy = Math.abs(ball.vy) * 0.88;
+  } else if (!insideGoalMouth && ball.y + ball.radius > FIELD.bottom) {
+    ball.y = FIELD.bottom - ball.radius;
+    if (ball.vy > 0) ball.vy = -Math.abs(ball.vy) * 0.88;
+  }
+}
+
+function constrainCarrierPair(carrier: Body, ball: Body) {
+  const leftEdge = Math.min(carrier.x - carrier.radius, ball.x - ball.radius);
+  const rightEdge = Math.max(carrier.x + carrier.radius, ball.x + ball.radius);
+  let shiftX = 0;
+  if (leftEdge < FIELD.left) shiftX = FIELD.left - leftEdge;
+  else if (rightEdge > FIELD.right) shiftX = FIELD.right - rightEdge;
+
+  const insideGoalMouth = ball.x + shiftX > GOAL_LEFT && ball.x + shiftX < GOAL_RIGHT;
+  const topEdge = insideGoalMouth
+    ? carrier.y - carrier.radius
+    : Math.min(carrier.y - carrier.radius, ball.y - ball.radius);
+  const bottomEdge = insideGoalMouth
+    ? carrier.y + carrier.radius
+    : Math.max(carrier.y + carrier.radius, ball.y + ball.radius);
+  let shiftY = 0;
+  if (topEdge < FIELD.top) shiftY = FIELD.top - topEdge;
+  else if (bottomEdge > FIELD.bottom) shiftY = FIELD.bottom - bottomEdge;
+
+  carrier.x += shiftX;
+  carrier.y += shiftY;
+  ball.x += shiftX;
+  ball.y += shiftY;
+
+  if (shiftX > 0 && ball.vx < 0) ball.vx = Math.abs(ball.vx) * 0.84;
+  else if (shiftX < 0 && ball.vx > 0) ball.vx = -Math.abs(ball.vx) * 0.84;
+  if (shiftY > 0 && ball.vy < 0) ball.vy = Math.abs(ball.vy) * 0.84;
+  else if (shiftY < 0 && ball.vy > 0) ball.vy = -Math.abs(ball.vy) * 0.84;
+  carrier.vx = ball.vx;
+  carrier.vy = ball.vy;
 }
 
 function resolveCollision(a: Body, b: Body, restitution = 0.88) {
@@ -296,10 +403,12 @@ function drawPlayer(
   activeTeam: Team,
   selected: boolean,
   carrier: boolean,
+  keepUpright: boolean,
 ) {
   const meta = TEAM_META[body.team as Team];
   ctx.save();
   ctx.translate(body.x, body.y);
+  if (keepUpright) ctx.rotate(Math.PI);
 
   ctx.shadowColor = "rgba(0, 0, 0, 0.48)";
   ctx.shadowBlur = 10;
@@ -337,6 +446,15 @@ function drawPlayer(
   ctx.fillStyle = meta.dark;
   ctx.fillRect(0, -body.radius, body.radius, body.radius * 2);
   ctx.restore();
+
+  const goalDirectionY = (body.team === "mint" ? -1 : 1) * (keepUpright ? -1 : 1);
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.beginPath();
+  ctx.moveTo(0, goalDirectionY * (body.radius - 3));
+  ctx.lineTo(-4.5, goalDirectionY * (body.radius - 10));
+  ctx.lineTo(4.5, goalDirectionY * (body.radius - 10));
+  ctx.closePath();
+  ctx.fill();
 
   ctx.strokeStyle = "rgba(255,255,255,0.8)";
   ctx.lineWidth = 1.4;
@@ -387,7 +505,13 @@ function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body) {
   ctx.restore();
 }
 
-function drawGame(ctx: CanvasRenderingContext2D, game: Game) {
+function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team) {
+  const flipped = viewTeam === "coral";
+  ctx.save();
+  if (flipped) {
+    ctx.translate(WIDTH, HEIGHT);
+    ctx.rotate(Math.PI);
+  }
   drawPitch(ctx);
   const ball = game.bodies.find((body) => body.kind === "ball");
   for (const body of game.bodies) {
@@ -398,6 +522,7 @@ function drawGame(ctx: CanvasRenderingContext2D, game: Game) {
         game.activeTeam,
         game.drag?.bodyId === body.id,
         game.carrierId === body.id,
+        flipped,
       );
     }
   }
@@ -407,6 +532,7 @@ function drawGame(ctx: CanvasRenderingContext2D, game: Game) {
     const body = game.bodies.find((item) => item.id === game.drag?.bodyId);
     if (body) drawAim(ctx, game.drag, body);
   }
+  ctx.restore();
 
   if (game.phase === "goal" || game.phase === "finished") {
     ctx.fillStyle = "rgba(3, 10, 17, 0.42)";
@@ -438,6 +564,7 @@ function resetPositions(game: Game, kickoffTeam: Team) {
   game.lastShooterId = null;
   game.carrierId = null;
   game.carrierOffset = null;
+  game.carrierTargetOffset = null;
   game.caughtThisMove = false;
   game.goalResetAt = null;
   game.message = kickoffTeam === "mint" ? "NEON FC KICKOFF" : "EMBER KICKOFF";
@@ -453,6 +580,7 @@ function switchTurn(game: Game, reason = "TURN CHANGED") {
   game.lastShooterId = null;
   game.carrierId = null;
   game.carrierOffset = null;
+  game.carrierTargetOffset = null;
   game.caughtThisMove = false;
   game.message = reason;
   for (const body of game.bodies) {
@@ -461,11 +589,140 @@ function switchTurn(game: Game, reason = "TURN CHANGED") {
   }
 }
 
+function makeSnapshot(game: Game): GameSnapshot {
+  return {
+    ...game,
+    bodies: game.bodies.map((body) => ({ ...body })),
+    score: { ...game.score },
+    carrierOffset: game.carrierOffset ? { ...game.carrierOffset } : null,
+    carrierTargetOffset: game.carrierTargetOffset ? { ...game.carrierTargetOffset } : null,
+    drag: null,
+    goalResetAt: null,
+  };
+}
+
+function applySnapshot(game: Game, snapshot: GameSnapshot) {
+  game.bodies = snapshot.bodies.map((body) => ({ ...body }));
+  game.activeTeam = snapshot.activeTeam;
+  game.phase = snapshot.phase;
+  game.score = { ...snapshot.score };
+  game.passesLeft = snapshot.passesLeft;
+  game.turnTime = snapshot.turnTime;
+  game.turnTick = snapshot.turnTick;
+  game.drag = null;
+  game.lastShooterId = snapshot.lastShooterId;
+  game.carrierId = snapshot.carrierId;
+  game.carrierOffset = snapshot.carrierOffset ? { ...snapshot.carrierOffset } : null;
+  game.carrierTargetOffset = snapshot.carrierTargetOffset ? { ...snapshot.carrierTargetOffset } : null;
+  game.caughtThisMove = snapshot.caughtThisMove;
+  game.goalResetAt = snapshot.phase === "goal" ? performance.now() + 1350 : null;
+  game.message = snapshot.message;
+  game.winner = snapshot.winner;
+}
+
 export default function FlickFootball() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const kickoffTeamRef = useRef<Team>("mint");
   const [session, setSession] = useState(0);
   const [showRules, setShowRules] = useState(false);
   const [hud, setHud] = useState<Hud>(() => toHud(makeGame()));
+  const [onlineStage, setOnlineStage] = useState<OnlineStage>("menu");
+  const [match, setMatch] = useState<MatchInfo | null>(null);
+  const [playerName, setPlayerName] = useState("Ashwani");
+  const [searchSeconds, setSearchSeconds] = useState(0);
+  const [rematchReady, setRematchReady] = useState(0);
+  const [networkMessage, setNetworkMessage] = useState("");
+
+  useEffect(() => {
+    if (onlineStage !== "searching") return;
+    const timer = window.setInterval(() => setSearchSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [onlineStage]);
+
+  useEffect(() => {
+    return () => {
+      socketRef.current?.disconnect();
+    };
+  }, []);
+
+  const closeSocket = () => {
+    socketRef.current?.removeAllListeners();
+    socketRef.current?.disconnect();
+    socketRef.current = null;
+  };
+
+  const startMatchmaking = async () => {
+    closeSocket();
+    setMatch(null);
+    setNetworkMessage("");
+    setRematchReady(0);
+    setSearchSeconds(0);
+    setOnlineStage("searching");
+
+    const { io } = await import("socket.io-client");
+    const realtimeUrl = process.env.NODE_ENV === "development"
+      ? `${window.location.protocol}//${window.location.hostname}:3001`
+      : undefined;
+    const socket = io(realtimeUrl, { transports: ["websocket"], autoConnect: false });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      socket.emit("match:find", { name: playerName.trim() || "Player" });
+    });
+    socket.on("connect_error", () => {
+      setNetworkMessage("Could not reach the game server. Try again.");
+      setOnlineStage("menu");
+    });
+    socket.on("match:found", (data: MatchInfo) => {
+      kickoffTeamRef.current = "mint";
+      setMatch(data);
+      setNetworkMessage("");
+      setRematchReady(0);
+      setOnlineStage("matched");
+      setSession((value) => value + 1);
+    });
+    socket.on("match:opponent-left", () => {
+      setNetworkMessage("Your opponent left the match.");
+      setOnlineStage("disconnected");
+    });
+    socket.on("match:rematch-status", ({ ready }: { ready: number }) => {
+      setRematchReady(ready);
+    });
+    socket.on("match:reset", ({ activeTeam }: { activeTeam: Team }) => {
+      kickoffTeamRef.current = activeTeam;
+      setRematchReady(0);
+      setNetworkMessage("");
+      setSession((value) => value + 1);
+    });
+    socket.connect();
+  };
+
+  const cancelSearch = () => {
+    socketRef.current?.emit("match:cancel");
+    closeSocket();
+    setOnlineStage("menu");
+  };
+
+  const startPractice = () => {
+    closeSocket();
+    kickoffTeamRef.current = "mint";
+    setMatch(null);
+    setNetworkMessage("");
+    setOnlineStage("practice");
+    setSession((value) => value + 1);
+  };
+
+  const leaveMatch = () => {
+    socketRef.current?.emit("match:leave");
+    closeSocket();
+    kickoffTeamRef.current = "mint";
+    setMatch(null);
+    setNetworkMessage("");
+    setRematchReady(0);
+    setOnlineStage("menu");
+    setSession((value) => value + 1);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -479,9 +736,16 @@ export default function FlickFootball() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const game = makeGame();
+    const viewTeam: Team = onlineStage === "matched" && match ? match.myTeam : "mint";
+    game.activeTeam = kickoffTeamRef.current;
+    game.message = onlineStage === "matched"
+      ? `${TEAM_META[game.activeTeam].name} STARTS`
+      : "PULL BACK A DISC TO SHOOT";
     let frameId = 0;
     let previousTime = performance.now();
     let lastHudKey = "";
+    let shotPending = false;
+    let lastSequence = -1;
 
     const syncHud = () => {
       const next = toHud(game);
@@ -492,16 +756,60 @@ export default function FlickFootball() {
       }
     };
 
+    const publishState = () => {
+      if (onlineStage !== "matched" || !match) return;
+      socketRef.current?.emit("game:settled", {
+        matchId: match.matchId,
+        snapshot: makeSnapshot(game),
+      });
+    };
+
+    const applyShot = (shot: Shot) => {
+      if (game.phase !== "ready") return;
+      const body = game.bodies.find((item) => item.id === shot.bodyId);
+      if (!body || body.kind !== "player" || body.team !== game.activeTeam) return;
+      const launchSpeed = (shot.pull / MAX_PULL) * MAX_SPEED;
+      body.vx = shot.dirX * launchSpeed;
+      body.vy = shot.dirY * launchSpeed;
+      game.lastShooterId = body.id;
+
+      if (game.carrierId === body.id) {
+        const ball = game.bodies.find((item) => item.kind === "ball");
+        if (ball) {
+          ball.vx = body.vx * 1.06;
+          ball.vy = body.vy * 1.06;
+          ball.x = body.x + shot.dirX * (body.radius + ball.radius + 2);
+          ball.y = body.y + shot.dirY * (body.radius + ball.radius + 2);
+        }
+        game.carrierId = null;
+        game.carrierOffset = null;
+        game.carrierTargetOffset = null;
+      }
+
+      shotPending = false;
+      game.caughtThisMove = false;
+      game.phase = "moving";
+      game.message = "BALL IN MOTION";
+      syncHud();
+    };
+
     const pointFromEvent = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      return {
-        x: ((event.clientX - rect.left) / rect.width) * WIDTH,
-        y: ((event.clientY - rect.top) / rect.height) * HEIGHT,
-      };
+      const screenX = ((event.clientX - rect.left) / rect.width) * WIDTH;
+      const screenY = ((event.clientY - rect.top) / rect.height) * HEIGHT;
+      return viewTeam === "coral"
+        ? { x: WIDTH - screenX, y: HEIGHT - screenY }
+        : { x: screenX, y: screenY };
     };
 
     const onPointerDown = (event: PointerEvent) => {
-      if (game.phase !== "ready") return;
+      if (game.phase !== "ready" || shotPending) return;
+      if (onlineStage !== "practice" && onlineStage !== "matched") return;
+      if (onlineStage === "matched" && match?.myTeam !== game.activeTeam) {
+        game.message = "OPPONENT IS AIMING";
+        syncHud();
+        return;
+      }
       const point = pointFromEvent(event);
       const selectable = game.bodies
         .filter((body) => body.kind === "player" && body.team === game.activeTeam)
@@ -552,29 +860,15 @@ export default function FlickFootball() {
         return;
       }
 
-      const body = game.bodies.find((item) => item.id === drag.bodyId);
-      if (!body) return;
-      const launchSpeed = (drag.pull / MAX_PULL) * MAX_SPEED;
-      body.vx = drag.dirX * launchSpeed;
-      body.vy = drag.dirY * launchSpeed;
-      game.lastShooterId = body.id;
-
-      if (game.carrierId === body.id) {
-        const ball = game.bodies.find((item) => item.kind === "ball");
-        if (ball) {
-          ball.vx = body.vx * 1.06;
-          ball.vy = body.vy * 1.06;
-          ball.x = body.x + drag.dirX * (body.radius + ball.radius + 2);
-          ball.y = body.y + drag.dirY * (body.radius + ball.radius + 2);
-        }
-        game.carrierId = null;
-        game.carrierOffset = null;
+      const shot = { bodyId: drag.bodyId, dirX: drag.dirX, dirY: drag.dirY, pull: drag.pull };
+      if (onlineStage === "matched" && match) {
+        shotPending = true;
+        game.message = "SHOT LOCKED";
+        syncHud();
+        socketRef.current?.emit("game:shoot", shot);
+      } else {
+        applyShot(shot);
       }
-
-      game.caughtThisMove = false;
-      game.phase = "moving";
-      game.message = "BALL IN MOTION";
-      syncHud();
     };
 
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -582,7 +876,30 @@ export default function FlickFootball() {
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
 
+    const socket = socketRef.current;
+    const onRemoteShot = (shot: Shot & { sequence: number }) => {
+      if (shot.sequence <= lastSequence) return;
+      lastSequence = shot.sequence;
+      applyShot(shot);
+    };
+    const onRemoteSync = ({ snapshot, sequence }: { snapshot: GameSnapshot; sequence: number }) => {
+      if (sequence < lastSequence) return;
+      lastSequence = sequence;
+      shotPending = false;
+      applySnapshot(game, snapshot);
+      syncHud();
+    };
+    const onGameError = ({ message }: { message: string }) => {
+      shotPending = false;
+      game.message = message.toUpperCase();
+      syncHud();
+    };
+    socket?.on("game:shot", onRemoteShot);
+    socket?.on("game:sync", onRemoteSync);
+    socket?.on("game:error", onGameError);
+
     const scoreGoal = (scoringTeam: Team, now: number) => {
+      const authorityTeam = game.activeTeam;
       game.score[scoringTeam] += 1;
       const scorerName = TEAM_META[scoringTeam].name;
       if (game.score[scoringTeam] >= 3) {
@@ -599,13 +916,16 @@ export default function FlickFootball() {
         body.vy = 0;
       }
       syncHud();
+      if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
     };
 
     const updatePhysics = (dt: number, now: number) => {
       if (game.phase === "goal" && game.goalResetAt && now >= game.goalResetAt) {
+        const authorityTeam = game.activeTeam;
         const kickoff = game.message.startsWith(TEAM_META.mint.name) ? "coral" : "mint";
         resetPositions(game, kickoff);
         syncHud();
+        if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
         return;
       }
       if (game.phase !== "moving") return;
@@ -685,6 +1005,10 @@ export default function FlickFootball() {
             const length = Math.max(1, Math.hypot(dx, dy));
             game.carrierId = playerBody.id;
             game.carrierOffset = { x: dx / length, y: dy / length };
+            game.carrierTargetOffset = {
+              x: 0,
+              y: playerBody.team === "mint" ? -1 : 1,
+            };
             const combinedVx = (ballBody.vx * ballBody.mass + playerBody.vx * playerBody.mass) /
               (ballBody.mass + playerBody.mass);
             const combinedVy = (ballBody.vy * ballBody.mass + playerBody.vy * playerBody.mass) /
@@ -695,12 +1019,13 @@ export default function FlickFootball() {
             ballBody.vy = combinedVy;
             game.caughtThisMove = true;
             game.passesLeft -= 1;
-            game.message = "PASS CAUGHT — KEEP THE TURN";
+            game.message = "PASS CAUGHT - ALIGNING TO GOAL";
             syncHud();
           } else if (game.carrierId !== playerBody.id) {
             if (game.carrierId && playerBody.team !== game.activeTeam) {
               game.carrierId = null;
               game.carrierOffset = null;
+              game.carrierTargetOffset = null;
               game.caughtThisMove = false;
               game.message = "POSSESSION BROKEN";
             }
@@ -709,16 +1034,29 @@ export default function FlickFootball() {
         }
       }
 
-      if (game.carrierId && game.carrierOffset) {
+      if (game.carrierId && game.carrierOffset && game.carrierTargetOffset) {
         const carrier = game.bodies.find((body) => body.id === game.carrierId);
         if (carrier) {
+          game.carrierOffset = rotateToward(
+            game.carrierOffset,
+            game.carrierTargetOffset,
+            6 * dt,
+          );
           const gap = carrier.radius + ball.radius - 1;
-          ball.x = carrier.x + game.carrierOffset.x * gap;
-          ball.y = carrier.y + game.carrierOffset.y * gap;
-          ball.vx = carrier.vx;
-          ball.vy = carrier.vy;
+          carrier.x = ball.x - game.carrierOffset.x * gap;
+          carrier.y = ball.y - game.carrierOffset.y * gap;
+          carrier.vx = ball.vx;
+          carrier.vy = ball.vy;
+          constrainCarrierPair(carrier, ball);
         }
       }
+
+      for (const body of game.bodies) {
+        if (body.kind === "player" && body.id !== game.carrierId) {
+          constrainPlayerToPitch(body);
+        }
+      }
+      if (!game.carrierId) constrainFreeBallToPitch(ball);
 
       if (ball.y + ball.radius < FIELD.top && ball.x > GOAL_LEFT && ball.x < GOAL_RIGHT) {
         scoreGoal("mint", now);
@@ -729,8 +1067,17 @@ export default function FlickFootball() {
         return;
       }
 
-      const hasMotion = game.bodies.some((body) => speed(body) > 7);
+      const carrierIsAligning = Boolean(
+        game.carrierOffset &&
+        game.carrierTargetOffset &&
+        Math.hypot(
+          game.carrierOffset.x - game.carrierTargetOffset.x,
+          game.carrierOffset.y - game.carrierTargetOffset.y,
+        ) > 0.015,
+      );
+      const hasMotion = carrierIsAligning || game.bodies.some((body) => speed(body) > 7);
       if (!hasMotion) {
+        const authorityTeam = game.activeTeam;
         for (const body of game.bodies) {
           body.vx = 0;
           body.vy = 0;
@@ -747,6 +1094,7 @@ export default function FlickFootball() {
           switchTurn(game);
           syncHud();
         }
+        if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
       }
     };
 
@@ -762,13 +1110,15 @@ export default function FlickFootball() {
           syncHud();
         }
         if (game.turnTime <= 0) {
+          const authorityTeam = game.activeTeam;
           switchTurn(game, "TIME'S UP");
           syncHud();
+          if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
         }
       }
 
       updatePhysics(dt, now);
-      drawGame(ctx, game);
+      drawGame(ctx, game, viewTeam);
       frameId = requestAnimationFrame(loop);
     };
 
@@ -781,22 +1131,44 @@ export default function FlickFootball() {
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
+      socket?.off("game:shot", onRemoteShot);
+      socket?.off("game:sync", onRemoteSync);
+      socket?.off("game:error", onGameError);
     };
-  }, [session]);
+  }, [match, onlineStage, session]);
 
   const active = TEAM_META[hud.activeTeam];
-  const opponent: Team = hud.activeTeam === "mint" ? "coral" : "mint";
+  const nameForTeam = (team: Team) => {
+    if (!match) return TEAM_META[team].name;
+    return match.player.team === team ? match.player.name : match.opponent.name;
+  };
+  const mintName = nameForTeam("mint");
+  const coralName = nameForTeam("coral");
+  const turnMessage = onlineStage === "matched" && match?.myTeam !== hud.activeTeam && hud.phase === "ready"
+    ? "OPPONENT IS AIMING"
+    : hud.message;
+
+  const requestRematch = () => {
+    if (onlineStage === "practice") {
+      kickoffTeamRef.current = "mint";
+      setSession((value) => value + 1);
+      return;
+    }
+    if (onlineStage === "matched" && hud.phase === "finished") {
+      socketRef.current?.emit("match:rematch");
+    }
+  };
 
   return (
     <section className={styles.gameShell} aria-label="FlickXI tabletop football game">
       <header className={styles.scoreboard}>
-        <button className={styles.iconButton} type="button" aria-label="Leave match">
+        <button className={styles.iconButton} type="button" aria-label="Leave match" onClick={leaveMatch}>
           <span aria-hidden="true">←</span>
         </button>
 
         <div className={styles.playerIdentity}>
-          <span className={`${styles.avatar} ${styles.mintAvatar}`}>N</span>
-          <span className={styles.playerName}>NEON FC</span>
+          <span className={`${styles.avatar} ${styles.mintAvatar}`}>{mintName.charAt(0).toUpperCase()}</span>
+          <span className={styles.playerName}>{mintName}</span>
         </div>
 
         <div className={styles.scoreCenter}>
@@ -811,8 +1183,8 @@ export default function FlickFootball() {
         </div>
 
         <div className={`${styles.playerIdentity} ${styles.playerIdentityRight}`}>
-          <span className={styles.playerName}>EMBER</span>
-          <span className={`${styles.avatar} ${styles.coralAvatar}`}>E</span>
+          <span className={styles.playerName}>{coralName}</span>
+          <span className={`${styles.avatar} ${styles.coralAvatar}`}>{coralName.charAt(0).toUpperCase()}</span>
         </div>
 
         <button
@@ -828,7 +1200,7 @@ export default function FlickFootball() {
       <div className={styles.turnStrip} data-team={hud.activeTeam}>
         <div>
           <span className={styles.liveDot} />
-          {hud.message}
+          {turnMessage}
         </div>
         <div className={styles.passPips} aria-label={`${hud.passesLeft} passes remaining`}>
           <span>PASS CHAIN</span>
@@ -861,10 +1233,16 @@ export default function FlickFootball() {
           <span>{active.short}</span>
           <div>
             <small>ACTIVE TEAM</small>
-            <strong>{active.name}</strong>
+            <strong>{nameForTeam(hud.activeTeam)}</strong>
           </div>
         </div>
-        <button className={styles.restartButton} type="button" onClick={() => setSession((value) => value + 1)}>
+        <button
+          className={styles.restartButton}
+          type="button"
+          onClick={requestRematch}
+          disabled={onlineStage === "matched" && hud.phase !== "finished"}
+        >
+          {onlineStage === "matched" && rematchReady > 0 ? <span>{rematchReady}/2 </span> : null}
           ↻ <span>Restart</span>
         </button>
       </footer>
@@ -885,6 +1263,60 @@ export default function FlickFootball() {
             </ol>
             <button className={styles.playButton} type="button" onClick={() => setShowRules(false)}>LET’S PLAY</button>
           </article>
+        </div>
+      ) : null}
+
+      {onlineStage === "menu" ? (
+        <div className={styles.matchOverlay}>
+          <div className={styles.matchCard}>
+            <div className={styles.livePill}><span /> LIVE MULTIPLAYER</div>
+            <div className={styles.brandBall} aria-hidden="true"><i /><b>XI</b></div>
+            <p className={styles.eyebrow}>FLICK FOOTBALL</p>
+            <h1>Find a rival.<br />Own the pitch.</h1>
+            <p className={styles.matchCopy}>Two players, one live match. The game begins only when another player joins the queue.</p>
+            <label className={styles.nameField}>
+              <span>PLAYER NAME</span>
+              <input
+                value={playerName}
+                maxLength={18}
+                onChange={(event) => setPlayerName(event.target.value)}
+                aria-label="Player name"
+              />
+            </label>
+            {networkMessage ? <p className={styles.networkError}>{networkMessage}</p> : null}
+            <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
+              <span>PLAY ONLINE</span><b>1 VS 1</b>
+            </button>
+            <button className={styles.practiceButton} type="button" onClick={startPractice}>PRACTICE ON THIS DEVICE</button>
+          </div>
+        </div>
+      ) : null}
+
+      {onlineStage === "searching" ? (
+        <div className={styles.matchOverlay}>
+          <div className={`${styles.matchCard} ${styles.searchCard}`}>
+            <div className={styles.searchOrb} aria-hidden="true"><i /><i /><span>VS</span></div>
+            <p className={styles.eyebrow}>MATCHMAKING</p>
+            <h2>Finding your opponent</h2>
+            <p className={styles.matchCopy}>Waiting for exactly one available player...</p>
+            <div className={styles.queueStatus}><span /> SEARCHING <b>{searchSeconds}s</b></div>
+            <button className={styles.practiceButton} type="button" onClick={cancelSearch}>CANCEL SEARCH</button>
+          </div>
+        </div>
+      ) : null}
+
+      {onlineStage === "disconnected" ? (
+        <div className={styles.matchOverlay}>
+          <div className={`${styles.matchCard} ${styles.searchCard}`}>
+            <div className={styles.disconnectIcon} aria-hidden="true">!</div>
+            <p className={styles.eyebrow}>MATCH ENDED</p>
+            <h2>Opponent disconnected</h2>
+            <p className={styles.matchCopy}>{networkMessage || "This match is no longer active."}</p>
+            <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
+              <span>FIND NEW RIVAL</span><b>GO</b>
+            </button>
+            <button className={styles.practiceButton} type="button" onClick={leaveMatch}>BACK TO LOBBY</button>
+          </div>
         </div>
       ) : null}
 
