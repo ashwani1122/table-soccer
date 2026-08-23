@@ -13,6 +13,29 @@ export type PossessionImpact = {
   ballVy: number;
 };
 
+export type BallRoll = {
+  phase: number;
+  angle: number;
+};
+
+export function advanceBallRoll(
+  currentPhase: number,
+  currentAngle: number,
+  travelX: number,
+  travelY: number,
+  radius: number,
+): BallRoll {
+  const distance = Math.hypot(travelX, travelY);
+  if (!Number.isFinite(distance) || distance < 0.0001) {
+    return { phase: currentPhase, angle: currentAngle };
+  }
+
+  return {
+    phase: currentPhase + distance / Math.max(0.001, radius),
+    angle: Math.atan2(travelY, travelX),
+  };
+}
+
 export function calculatePossessionImpact(
   player: CollisionBody,
   ball: CollisionBody,

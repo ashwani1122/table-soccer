@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
-import { calculatePossessionImpact } from "../src/lib/game-physics.ts";
+import { advanceBallRoll, calculatePossessionImpact } from "../src/lib/game-physics.ts";
 import { registerGameSocket } from "../src/lib/realtime-game.ts";
 
 type Frame = { event: string; payload?: Record<string, unknown> };
@@ -23,6 +23,13 @@ assert.equal(calculatePossessionImpact(
   900,
   0.98,
 ), null);
+
+const eastRoll = advanceBallRoll(0, 0, 12, 0, 12);
+assert.equal(eastRoll.phase, 1);
+assert.equal(eastRoll.angle, 0);
+const northWestRoll = advanceBallRoll(eastRoll.phase, eastRoll.angle, -6, -6, 12);
+assert(northWestRoll.phase > eastRoll.phase);
+assert(northWestRoll.angle < -Math.PI / 2);
 
 class FakeSocket extends EventEmitter {
   readyState = 1;

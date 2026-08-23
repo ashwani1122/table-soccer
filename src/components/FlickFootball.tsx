@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { calculatePossessionImpact } from "@/lib/game-physics";
+import { advanceBallRoll, calculatePossessionImpact } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
 import styles from "./FlickFootball.module.css";
 
@@ -36,7 +36,8 @@ type Body = {
   radius: number;
   mass: number;
   number?: number;
-  rotation?: number;
+  rollPhase?: number;
+  rollAngle?: number;
 };
 
 type Drag = {
@@ -422,7 +423,8 @@ function makeBodies(): Body[] {
       vy: 0,
       radius: BALL_RADIUS,
       mass: 0.7,
-      rotation: 0,
+      rollPhase: 0,
+      rollAngle: 0,
     },
   ];
 }
@@ -657,7 +659,6 @@ function drawPitch(ctx: CanvasRenderingContext2D) {
 function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.save();
   ctx.translate(ball.x, ball.y);
-  ctx.rotate(ball.rotation ?? 0);
   ctx.shadowColor = "rgba(0,0,0,0.38)";
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 3;
@@ -677,19 +678,44 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowColor = "transparent";
-  ctx.strokeStyle = "rgba(12, 25, 38, 0.72)";
-  ctx.lineWidth = 1.2;
-  ctx.stroke();
-  ctx.fillStyle = "#14202d";
+
+  // Keep the light fixed while the surface pattern travels across the sphere.
+  // Rotating the whole drawing makes the ball look like a flat coin spinning.
+  ctx.save();
   ctx.beginPath();
-  ctx.arc(0, 0, 3.6, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.arc(0, 0, ball.radius - 1, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.rotate(ball.rollAngle ?? 0);
+
+  const phase = ball.rollPhase ?? 0;
+  const seamX = Math.sin(phase) * ball.radius * 0.64;
+  const seamWidth = Math.max(1.5, Math.abs(Math.cos(phase)) * ball.radius * 0.7);
+  ctx.strokeStyle = "rgba(20, 32, 45, 0.42)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(seamX, 0, seamWidth, ball.radius * 0.96, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = "#14202d";
   for (let i = 0; i < 5; i += 1) {
-    const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2;
+    const patchPhase = phase + (Math.PI * 2 * i) / 5;
+    const depth = Math.cos(patchPhase);
+    if (depth < -0.12) continue;
+    const laneY = [-0.42, 0.34, -0.06, 0.46, -0.3][i] * ball.radius;
+    const horizontalRadius = Math.sqrt(Math.max(0, ball.radius ** 2 - laneY ** 2));
+    const patchX = Math.sin(patchPhase) * horizontalRadius * 0.78;
+    const scale = 0.42 + Math.max(0, depth) * 0.58;
     ctx.beginPath();
-    ctx.arc(Math.cos(angle) * 7, Math.sin(angle) * 7, 2.1, 0, Math.PI * 2);
+    ctx.ellipse(patchX, laneY, 2.5 * scale, 3.1 * scale, 0, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(12, 25, 38, 0.72)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -1626,11 +1652,15 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         body.x += travelX;
         body.y += travelY;
         if (body.kind === "ball") {
-          const rollDirection = Math.abs(travelX) >= Math.abs(travelY)
-            ? Math.sign(travelX)
-            : -Math.sign(travelY);
-          body.rotation = (body.rotation ?? 0) +
-            (Math.hypot(travelX, travelY) / body.radius) * rollDirection;
+          const roll = advanceBallRoll(
+            body.rollPhase ?? 0,
+            body.rollAngle ?? 0,
+            travelX,
+            travelY,
+            body.radius,
+          );
+          body.rollPhase = roll.phase;
+          body.rollAngle = roll.angle;
         }
         body.vx *= damping;
         body.vy *= damping;
