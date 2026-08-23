@@ -615,28 +615,179 @@ function drawRoundedRect(
   ctx.roundRect(x, y, width, height, radius);
 }
 
+function drawCrowdStand(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  width: number,
+  rightSide: boolean,
+) {
+  const stand = ctx.createLinearGradient(x, 0, x + width, 0);
+  if (rightSide) {
+    stand.addColorStop(0, "#33413d");
+    stand.addColorStop(0.3, "#17231f");
+    stand.addColorStop(1, "#080f0e");
+  } else {
+    stand.addColorStop(0, "#080f0e");
+    stand.addColorStop(0.7, "#17231f");
+    stand.addColorStop(1, "#33413d");
+  }
+  ctx.fillStyle = stand;
+  ctx.fillRect(x, 54, width, 612);
+
+  const crowdColors = ["#f5c451", "#ed5d65", "#58b6e8", "#e8eef2", "#75d68e", "#b875e2"];
+  for (let row = 0; row < 39; row += 1) {
+    const y = 61 + row * 15.2;
+    for (let column = 0; column < 3; column += 1) {
+      const colorIndex = (row * 5 + column * 3 + (rightSide ? 2 : 0)) % crowdColors.length;
+      const personX = x + 4 + column * 6 + ((row + column) % 2) * 1.5;
+      ctx.fillStyle = crowdColors[colorIndex] ?? "#e8eef2";
+      ctx.fillRect(personX - 1.5, y + 2.6, 3, 4.8);
+      ctx.fillStyle = (row + column) % 3 === 0 ? "#c88b65" : "#f0b98c";
+      ctx.beginPath();
+      ctx.arc(personX, y, 1.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.strokeStyle = "rgba(193, 208, 203, 0.42)";
+  ctx.lineWidth = 1;
+  for (let y = 54; y <= 666; y += 68) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + width, y);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#94a09c";
+  ctx.fillRect(rightSide ? x : x + width - 2, 48, 2, 624);
+}
+
+function drawStadiumGoal(ctx: CanvasRenderingContext2D, top: boolean) {
+  const frontY = top ? FIELD.top : FIELD.bottom;
+  const backY = top ? 7 : HEIGHT - 7;
+  const backLeft = GOAL_LEFT + 7;
+  const backRight = GOAL_RIGHT - 7;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(GOAL_LEFT, frontY);
+  ctx.lineTo(backLeft, backY);
+  ctx.lineTo(backRight, backY);
+  ctx.lineTo(GOAL_RIGHT, frontY);
+  ctx.closePath();
+  const netShade = ctx.createLinearGradient(0, backY, 0, frontY);
+  netShade.addColorStop(0, "rgba(226, 239, 242, 0.2)");
+  netShade.addColorStop(1, "rgba(226, 239, 242, 0.04)");
+  ctx.fillStyle = netShade;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
+  ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+
+  ctx.strokeStyle = "rgba(226, 239, 242, 0.48)";
+  ctx.lineWidth = 0.8;
+  for (let column = 0; column <= 12; column += 1) {
+    const amount = column / 12;
+    ctx.beginPath();
+    ctx.moveTo(GOAL_LEFT + (GOAL_RIGHT - GOAL_LEFT) * amount, frontY);
+    ctx.lineTo(backLeft + (backRight - backLeft) * amount, backY);
+    ctx.stroke();
+  }
+  for (let row = 1; row < 6; row += 1) {
+    const amount = row / 6;
+    const y = frontY + (backY - frontY) * amount;
+    const left = GOAL_LEFT + (backLeft - GOAL_LEFT) * amount;
+    const right = GOAL_RIGHT + (backRight - GOAL_RIGHT) * amount;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+  }
+
+  const framePath = () => {
+    ctx.beginPath();
+    ctx.moveTo(GOAL_LEFT, frontY);
+    ctx.lineTo(backLeft, backY);
+    ctx.lineTo(backRight, backY);
+    ctx.lineTo(GOAL_RIGHT, frontY);
+    ctx.moveTo(GOAL_LEFT, frontY);
+    ctx.lineTo(GOAL_RIGHT, frontY);
+  };
+  framePath();
+  ctx.strokeStyle = "rgba(4, 12, 15, 0.62)";
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  framePath();
+  const metal = ctx.createLinearGradient(GOAL_LEFT, 0, GOAL_RIGHT, 0);
+  metal.addColorStop(0, "#87969d");
+  metal.addColorStop(0.35, "#f7ffff");
+  metal.addColorStop(0.7, "#b9c8cc");
+  metal.addColorStop(1, "#6f7e84");
+  ctx.strokeStyle = metal;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCornerFlag(ctx: CanvasRenderingContext2D, x: number, y: number, top: boolean, left: boolean) {
+  const directionY = top ? -1 : 1;
+  const poleTopY = y + directionY * 17;
+  ctx.strokeStyle = "#d7e1df";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, poleTopY);
+  ctx.stroke();
+  ctx.fillStyle = top ? "#ff5068" : "#45b9ef";
+  ctx.beginPath();
+  ctx.moveTo(x, poleTopY);
+  ctx.quadraticCurveTo(x + (left ? 5 : -5), poleTopY + directionY * 2, x + (left ? 10 : -10), poleTopY + directionY * 7);
+  ctx.lineTo(x, poleTopY + directionY * 9);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawPitch(ctx: CanvasRenderingContext2D) {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
 
   const surround = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-  surround.addColorStop(0, "#0b352b");
-  surround.addColorStop(1, "#06251f");
+  surround.addColorStop(0, "#173f29");
+  surround.addColorStop(0.5, "#0e2f22");
+  surround.addColorStop(1, "#071d17");
   ctx.fillStyle = surround;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
+  drawCrowdStand(ctx, 2, 20, false);
+  drawCrowdStand(ctx, WIDTH - 22, 20, true);
+
   for (let y = FIELD.top; y < FIELD.bottom; y += 53) {
-    ctx.fillStyle = y % 106 === FIELD.top % 106 ? "#168b62" : "#147e59";
-    ctx.fillRect(FIELD.left, y, FIELD.right - FIELD.left, 53);
+    const stripe = Math.floor((y - FIELD.top) / 53) % 2;
+    const grass = ctx.createLinearGradient(FIELD.left, y, FIELD.right, y + 53);
+    grass.addColorStop(0, stripe === 0 ? "#2e8a45" : "#277e3e");
+    grass.addColorStop(0.5, stripe === 0 ? "#45a955" : "#38994c");
+    grass.addColorStop(1, stripe === 0 ? "#277e3e" : "#237439");
+    ctx.fillStyle = grass;
+    ctx.fillRect(FIELD.left, y, FIELD.right - FIELD.left, Math.min(53, FIELD.bottom - y));
   }
 
-  const vignette = ctx.createRadialGradient(210, 360, 80, 210, 360, 390);
-  vignette.addColorStop(0, "rgba(84, 241, 163, 0.14)");
-  vignette.addColorStop(1, "rgba(0, 22, 17, 0.34)");
+  ctx.fillStyle = "rgba(228, 255, 199, 0.075)";
+  for (let blade = 0; blade < 190; blade += 1) {
+    const x = FIELD.left + ((blade * 83) % (FIELD.right - FIELD.left));
+    const y = FIELD.top + ((blade * 137) % (FIELD.bottom - FIELD.top));
+    ctx.fillRect(x, y, 1, 3 + (blade % 4));
+  }
+
+  const vignette = ctx.createRadialGradient(210, 360, 65, 210, 360, 390);
+  vignette.addColorStop(0, "rgba(210, 255, 178, 0.1)");
+  vignette.addColorStop(0.72, "rgba(18, 78, 36, 0.02)");
+  vignette.addColorStop(1, "rgba(0, 18, 11, 0.34)");
   ctx.fillStyle = vignette;
   ctx.fillRect(FIELD.left, FIELD.top, FIELD.right - FIELD.left, FIELD.bottom - FIELD.top);
 
-  ctx.strokeStyle = "rgba(232, 255, 246, 0.88)";
-  ctx.lineWidth = 2.2;
+  drawStadiumGoal(ctx, true);
+  drawStadiumGoal(ctx, false);
+
+  ctx.strokeStyle = "rgba(246, 250, 238, 0.9)";
+  ctx.lineWidth = 2.1;
   ctx.strokeRect(FIELD.left, FIELD.top, FIELD.right - FIELD.left, FIELD.bottom - FIELD.top);
   ctx.beginPath();
   ctx.moveTo(FIELD.left, HEIGHT / 2);
@@ -645,7 +796,7 @@ function drawPitch(ctx: CanvasRenderingContext2D) {
   ctx.beginPath();
   ctx.arc(WIDTH / 2, HEIGHT / 2, 58, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = "rgba(242,255,249,0.78)";
+  ctx.fillStyle = "rgba(247, 251, 239, 0.82)";
   ctx.beginPath();
   ctx.arc(WIDTH / 2, HEIGHT / 2, 4, 0, Math.PI * 2);
   ctx.fill();
@@ -654,49 +805,63 @@ function drawPitch(ctx: CanvasRenderingContext2D) {
   ctx.strokeRect(121, FIELD.bottom - 79, 178, 79);
   ctx.strokeRect(163, FIELD.top, 94, 35);
   ctx.strokeRect(163, FIELD.bottom - 35, 94, 35);
-
   ctx.beginPath();
   ctx.arc(WIDTH / 2, FIELD.top + 79, 44, 0.2, Math.PI - 0.2);
   ctx.stroke();
   ctx.beginPath();
   ctx.arc(WIDTH / 2, FIELD.bottom - 79, 44, Math.PI + 0.2, Math.PI * 2 - 0.2);
   ctx.stroke();
+  ctx.fillStyle = "rgba(247, 251, 239, 0.86)";
+  ctx.beginPath();
+  ctx.arc(WIDTH / 2, FIELD.top + 61, 2.5, 0, Math.PI * 2);
+  ctx.arc(WIDTH / 2, FIELD.bottom - 61, 2.5, 0, Math.PI * 2);
+  ctx.fill();
 
-  const drawGoal = (top: boolean) => {
-    const y = top ? 17 : 678;
-    ctx.save();
-    ctx.fillStyle = "rgba(230, 248, 255, 0.08)";
-    ctx.strokeStyle = "#dbe9ed";
-    ctx.lineWidth = 3;
-    ctx.fillRect(GOAL_LEFT, y, GOAL_RIGHT - GOAL_LEFT, 25);
-    ctx.strokeRect(GOAL_LEFT, y, GOAL_RIGHT - GOAL_LEFT, 25);
-    ctx.strokeStyle = "rgba(219, 233, 237, 0.28)";
-    ctx.lineWidth = 1;
-    for (let x = GOAL_LEFT + 9; x < GOAL_RIGHT; x += 9) {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + 25);
-      ctx.stroke();
-    }
-    for (let row = 6; row < 25; row += 6) {
-      ctx.beginPath();
-      ctx.moveTo(GOAL_LEFT, y + row);
-      ctx.lineTo(GOAL_RIGHT, y + row);
-      ctx.stroke();
-    }
-    ctx.restore();
-  };
-  drawGoal(true);
-  drawGoal(false);
-
-  ctx.fillStyle = "rgba(4, 14, 20, 0.38)";
-  ctx.fillRect(5, 78, 14, 564);
-  ctx.fillRect(401, 78, 14, 564);
-  for (let y = 87; y < 637; y += 18) {
-    ctx.fillStyle = y % 36 === 15 ? "#54d5a0" : "#ff6874";
-    ctx.fillRect(9, y, 6, 10);
-    ctx.fillRect(405, y, 6, 10);
+  const sideWall = ctx.createLinearGradient(FIELD.left - 6, 0, FIELD.left + 2, 0);
+  sideWall.addColorStop(0, "#5e6769");
+  sideWall.addColorStop(0.45, "#d8dedd");
+  sideWall.addColorStop(1, "#6d7779");
+  ctx.fillStyle = sideWall;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.38)";
+  ctx.shadowBlur = 5;
+  ctx.fillRect(FIELD.left - 6, FIELD.top, 7, FIELD.bottom - FIELD.top);
+  ctx.fillRect(FIELD.right - 1, FIELD.top, 7, FIELD.bottom - FIELD.top);
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(65, 72, 73, 0.52)";
+  ctx.lineWidth = 0.8;
+  for (let y = FIELD.top + 42; y < FIELD.bottom; y += 42) {
+    ctx.beginPath();
+    ctx.moveTo(FIELD.left - 6, y);
+    ctx.lineTo(FIELD.left + 1, y);
+    ctx.moveTo(FIELD.right - 1, y);
+    ctx.lineTo(FIELD.right + 6, y);
+    ctx.stroke();
   }
+
+  const endWall = ctx.createLinearGradient(0, FIELD.top - 6, 0, FIELD.top + 1);
+  endWall.addColorStop(0, "#646d70");
+  endWall.addColorStop(0.5, "#e0e4e3");
+  endWall.addColorStop(1, "#737d80");
+  ctx.fillStyle = endWall;
+  ctx.fillRect(FIELD.left, FIELD.top - 6, GOAL_LEFT - FIELD.left, 7);
+  ctx.fillRect(GOAL_RIGHT, FIELD.top - 6, FIELD.right - GOAL_RIGHT, 7);
+  ctx.fillRect(FIELD.left, FIELD.bottom - 1, GOAL_LEFT - FIELD.left, 7);
+  ctx.fillRect(GOAL_RIGHT, FIELD.bottom - 1, FIELD.right - GOAL_RIGHT, 7);
+  ctx.strokeStyle = "rgba(79, 87, 89, 0.6)";
+  for (let x = FIELD.left + 42; x < FIELD.right; x += 42) {
+    if (x > GOAL_LEFT && x < GOAL_RIGHT) continue;
+    ctx.beginPath();
+    ctx.moveTo(x, FIELD.top - 6);
+    ctx.lineTo(x, FIELD.top + 1);
+    ctx.moveTo(x, FIELD.bottom - 1);
+    ctx.lineTo(x, FIELD.bottom + 6);
+    ctx.stroke();
+  }
+
+  drawCornerFlag(ctx, FIELD.left - 4, FIELD.top + 1, true, true);
+  drawCornerFlag(ctx, FIELD.right + 4, FIELD.top + 1, true, false);
+  drawCornerFlag(ctx, FIELD.left - 4, FIELD.bottom - 1, false, true);
+  drawCornerFlag(ctx, FIELD.right + 4, FIELD.bottom - 1, false, false);
 }
 
 function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
@@ -738,6 +903,17 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.beginPath();
   ctx.ellipse(seamX, 0, seamWidth, ball.radius * 0.96, 0, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(
+    -seamX * 0.38,
+    0,
+    ball.radius * 0.9,
+    Math.max(1.2, seamWidth * 0.46),
+    0,
+    0,
+    Math.PI * 2,
+  );
+  ctx.stroke();
 
   ctx.fillStyle = "#14202d";
   for (let i = 0; i < 5; i += 1) {
@@ -749,10 +925,32 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
     const patchX = Math.sin(patchPhase) * horizontalRadius * 0.78;
     const scale = 0.42 + Math.max(0, depth) * 0.58;
     ctx.beginPath();
-    ctx.ellipse(patchX, laneY, 2.5 * scale, 3.1 * scale, 0, 0, Math.PI * 2);
+    for (let point = 0; point < 5; point += 1) {
+      const angle = -Math.PI / 2 + (Math.PI * 2 * point) / 5;
+      const x = patchX + Math.cos(angle) * 3 * scale;
+      const y = laneY + Math.sin(angle) * 3.25 * scale;
+      if (point === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
     ctx.fill();
   }
   ctx.restore();
+
+  const shine = ctx.createRadialGradient(
+    -ball.radius * 0.42,
+    -ball.radius * 0.5,
+    0,
+    -ball.radius * 0.42,
+    -ball.radius * 0.5,
+    ball.radius * 0.38,
+  );
+  shine.addColorStop(0, "rgba(255,255,255,0.82)");
+  shine.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = shine;
+  ctx.beginPath();
+  ctx.arc(0, 0, ball.radius - 1, 0, Math.PI * 2);
+  ctx.fill();
 
   ctx.strokeStyle = "rgba(12, 25, 38, 0.72)";
   ctx.lineWidth = 1.2;
@@ -778,13 +976,33 @@ function drawPlayer(
   if (keepUpright) ctx.rotate(Math.PI);
 
   ctx.shadowColor = "rgba(0, 0, 0, 0.48)";
-  ctx.shadowBlur = 10;
-  ctx.shadowOffsetY = 4;
-  ctx.fillStyle = "#111a27";
+  ctx.shadowBlur = 9;
+  ctx.shadowOffsetY = 5;
+  ctx.fillStyle = "#05090d";
+  ctx.beginPath();
+  ctx.arc(0, 1.5, body.radius + 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+
+  const rim = ctx.createRadialGradient(
+    -body.radius * 0.42,
+    -body.radius * 0.5,
+    1,
+    0,
+    0,
+    body.radius + 2,
+  );
+  rim.addColorStop(0, "#f5fbfc");
+  rim.addColorStop(0.32, "#9eabb0");
+  rim.addColorStop(0.7, "#465158");
+  rim.addColorStop(1, "#161d22");
+  ctx.fillStyle = rim;
   ctx.beginPath();
   ctx.arc(0, 0, body.radius + 2, 0, Math.PI * 2);
   ctx.fill();
-  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(4, 8, 12, 0.86)";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
 
   if (body.team === activeTeam && !hideActiveRing) {
     ctx.save();
@@ -813,13 +1031,39 @@ function drawPlayer(
 
   ctx.save();
   ctx.beginPath();
-  ctx.arc(0, 0, body.radius - 2, 0, Math.PI * 2);
+  ctx.arc(0, 0, body.radius - 2.2, 0, Math.PI * 2);
   ctx.clip();
   ctx.fillStyle = meta.primary;
   ctx.fillRect(-body.radius, -body.radius, body.radius, body.radius * 2);
   ctx.fillStyle = meta.dark;
   ctx.fillRect(0, -body.radius, body.radius, body.radius * 2);
+
+  const faceLight = ctx.createRadialGradient(
+    -body.radius * 0.42,
+    -body.radius * 0.52,
+    1,
+    0,
+    0,
+    body.radius,
+  );
+  faceLight.addColorStop(0, "rgba(255,255,255,0.58)");
+  faceLight.addColorStop(0.4, "rgba(255,255,255,0.08)");
+  faceLight.addColorStop(0.72, "rgba(0,0,0,0.04)");
+  faceLight.addColorStop(1, "rgba(0,0,0,0.48)");
+  ctx.fillStyle = faceLight;
+  ctx.fillRect(-body.radius, -body.radius, body.radius * 2, body.radius * 2);
   ctx.restore();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.62)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, 0, body.radius - 3.1, Math.PI * 1.08, Math.PI * 1.88);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(0,0,0,0.56)";
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(0, 0.8, body.radius - 2.8, Math.PI * 0.12, Math.PI * 0.88);
+  ctx.stroke();
 
   const facing = carrierFacing ?? { x: 0, y: body.team === "mint" ? -1 : 1 };
   const viewDirection = keepUpright
@@ -844,16 +1088,29 @@ function drawPlayer(
   ctx.closePath();
   ctx.fill();
 
-  ctx.strokeStyle = "rgba(255,255,255,0.8)";
-  ctx.lineWidth = 1.4;
+  const badge = ctx.createRadialGradient(-3, -4, 1, 0, 0, 11);
+  badge.addColorStop(0, "rgba(255,255,255,0.34)");
+  badge.addColorStop(0.55, "rgba(12,24,31,0.74)");
+  badge.addColorStop(1, "rgba(3,8,12,0.94)");
+  ctx.fillStyle = badge;
   ctx.beginPath();
-  ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
+  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.76)";
+  ctx.lineWidth = 1.1;
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.24)";
+  ctx.beginPath();
+  ctx.arc(0, 0, 7.4, 0, Math.PI * 2);
   ctx.stroke();
   ctx.fillStyle = "#fff";
-  ctx.font = "800 9px Arial";
+  ctx.shadowColor = "rgba(0,0,0,0.8)";
+  ctx.shadowBlur = 2;
+  ctx.font = "900 8.5px Arial";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(`${meta.short}${body.number}`, 0, 0.5);
+  ctx.shadowColor = "transparent";
   ctx.restore();
 }
 
