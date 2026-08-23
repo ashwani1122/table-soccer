@@ -53,7 +53,7 @@ export class RealtimeClient {
     return this;
   }
 
-  connect() {
+  connect(resumePrevious = false) {
     if (this.socket && this.socket.readyState < WebSocket.CLOSING) return this;
 
     this.manuallyClosed = false;
@@ -63,7 +63,7 @@ export class RealtimeClient {
 
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return;
-      const reconnecting = this.hasConnected;
+      const reconnecting = resumePrevious || this.hasConnected;
       this.connected = true;
       this.hasConnected = true;
       this.reconnectAttempt = 0;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { calculatePossessionImpact } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
 import styles from "./FlickFootball.module.css";
 
@@ -105,6 +106,19 @@ type Shot = {
 type GameSnapshot = Omit<Game, "drag" | "goalResetAt"> & {
   drag: null;
   goalResetAt: number | null;
+};
+
+type SequencedShot = Shot & { sequence: number };
+
+type CachedSync = {
+  matchId: string;
+  snapshot: GameSnapshot;
+  sequence: number;
+};
+
+type CachedShot = {
+  matchId: string;
+  shot: SequencedShot;
 };
 
 type SoundEngine = {
@@ -759,7 +773,7 @@ function drawPlayer(
   ctx.restore();
 }
 
-function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body) {
+function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body, possessionBall?: Body) {
   const power = drag.pull / MAX_PULL;
   const frontX = body.x + drag.dirX * (body.radius + 9);
   const frontY = body.y + drag.dirY * (body.radius + 9);
@@ -792,6 +806,35 @@ function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body) {
   ctx.moveTo(body.x - drag.dirX * body.radius, body.y - drag.dirY * body.radius);
   ctx.lineTo(drag.pointerX, drag.pointerY);
   ctx.stroke();
+
+  if (possessionBall && drag.pull >= 8) {
+    const impact = calculatePossessionImpact(
+      body,
+      possessionBall,
+      { x: drag.dirX, y: drag.dirY },
+      power * MAX_SPEED,
+      BALL_COLLISION_RESTITUTION,
+    );
+    if (impact) {
+      const impactSpeed = Math.max(1, Math.hypot(impact.ballVx, impact.ballVy));
+      const trajectoryLength = 34 + power * 48;
+      const endX = possessionBall.x + (impact.ballVx / impactSpeed) * trajectoryLength;
+      const endY = possessionBall.y + (impact.ballVy / impactSpeed) * trajectoryLength;
+      ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = "rgba(89, 232, 255, 0.92)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(possessionBall.x, possessionBall.y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    } else {
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(255, 116, 123, 0.92)";
+      ctx.font = "800 9px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("MISS", possessionBall.x, possessionBall.y - possessionBall.radius - 8);
+    }
+  }
   ctx.restore();
 }
 
@@ -830,7 +873,14 @@ function drawGame(
 
   if (visibleAim) {
     const body = game.bodies.find((item) => item.id === visibleAim.bodyId);
-    if (body) drawAim(ctx, visibleAim, body);
+    if (body) {
+      drawAim(
+        ctx,
+        visibleAim,
+        body,
+        game.carrierId === body.id ? ball : undefined,
+      );
+    }
   }
   ctx.restore();
 
@@ -941,6 +991,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const kickoffTeamRef = useRef<Team>("mint");
   const connectionReadyRef = useRef(true);
   const opponentConnectedRef = useRef(true);
+  const onlineStageRef = useRef<OnlineStage>("menu");
+  const matchRef = useRef<MatchInfo | null>(null);
+  const latestSyncRef = useRef<CachedSync | null>(null);
+  const latestShotRef = useRef<CachedShot | null>(null);
   const [session, setSession] = useState(0);
   const [showRules, setShowRules] = useState(false);
   const [hud, setHud] = useState<Hud>(() => toHud(makeGame()));
@@ -957,6 +1011,14 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const [roomCopied, setRoomCopied] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [opponentReconnecting, setOpponentReconnecting] = useState(false);
+
+  useEffect(() => {
+    onlineStageRef.current = onlineStage;
+  }, [onlineStage]);
+
+  useEffect(() => {
+    matchRef.current = match;
+  }, [match]);
 
   useEffect(() => {
     if (onlineStage !== "searching") return;
@@ -986,7 +1048,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
 
   const connectRealtime = async (
     onConnect: (socket: RealtimeClient) => void,
-    errorStage: Extract<OnlineStage, "menu" | "join-room">,
+    errorStage: Extract<OnlineStage, "menu" | "join-room" | "disconnected">,
+    resumePrevious = false,
   ) => {
     closeSocket();
     try {
@@ -995,6 +1058,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
 
       socket.on("connect", () => onConnect(socket));
       socket.on("connect_error", () => {
+        setReconnecting(false);
         setRoomPending(false);
         setNetworkMessage("Could not reach the game server. Try again.");
         setOnlineStage(errorStage);
@@ -1015,14 +1079,18 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       });
       socket.on("session:expired", ({ message }: { message?: string }) => {
         connectionReadyRef.current = false;
+        matchRef.current = null;
         setReconnecting(false);
+        setMatch(null);
         setNetworkMessage(message || "The previous match is no longer available.");
         setOnlineStage("disconnected");
       });
       socket.on("session:replaced", () => {
         socket.disconnect();
         connectionReadyRef.current = false;
+        matchRef.current = null;
         setReconnecting(false);
+        setMatch(null);
         setNetworkMessage("This match was resumed in another window.");
         setOnlineStage("disconnected");
       });
@@ -1030,6 +1098,19 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setRoomPending(false);
         setNetworkMessage(message);
         setOnlineStage("disconnected");
+      });
+      socket.on("game:shot", (shot: SequencedShot) => {
+        const activeMatch = matchRef.current;
+        if (activeMatch) latestShotRef.current = { matchId: activeMatch.matchId, shot };
+      });
+      socket.on("game:sync", ({ snapshot, sequence }: { snapshot: GameSnapshot; sequence: number }) => {
+        const activeMatch = matchRef.current;
+        if (!activeMatch) return;
+        latestSyncRef.current = { matchId: activeMatch.matchId, snapshot, sequence };
+        if (latestShotRef.current?.matchId === activeMatch.matchId &&
+          latestShotRef.current.shot.sequence <= sequence) {
+          latestShotRef.current = null;
+        }
       });
       socket.on("room:created", ({ code }: { code: string }) => {
         connectionReadyRef.current = true;
@@ -1052,6 +1133,9 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       socket.on("match:found", (data: MatchInfo) => {
         connectionReadyRef.current = true;
         kickoffTeamRef.current = "mint";
+        matchRef.current = data;
+        latestSyncRef.current = null;
+        latestShotRef.current = null;
         setMatch(data);
         setRoomPending(false);
         if (data.roomCode) setRoomCode(data.roomCode);
@@ -1063,10 +1147,18 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setOnlineStage("matched");
         setSession((value) => value + 1);
       });
-      socket.on("match:resumed", () => {
+      socket.on("match:resumed", (data: MatchInfo) => {
+        const needsCanvasRestore = onlineStageRef.current !== "matched";
         connectionReadyRef.current = true;
+        opponentConnectedRef.current = true;
+        matchRef.current = data;
+        onlineStageRef.current = "matched";
+        setMatch((current) => current?.matchId === data.matchId ? current : data);
         setReconnecting(false);
+        setOpponentReconnecting(false);
         setNetworkMessage("");
+        setOnlineStage("matched");
+        if (needsCanvasRestore) setSession((value) => value + 1);
       });
       socket.on("match:opponent-reconnecting", () => {
         opponentConnectedRef.current = false;
@@ -1078,7 +1170,9 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       });
       socket.on("match:opponent-left", () => {
         opponentConnectedRef.current = false;
+        matchRef.current = null;
         setOpponentReconnecting(false);
+        setMatch(null);
         setNetworkMessage("Your opponent left the match.");
         setOnlineStage("disconnected");
       });
@@ -1088,12 +1182,15 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       socket.on("match:reset", ({ activeTeam }: { activeTeam: Team }) => {
         connectionReadyRef.current = true;
         kickoffTeamRef.current = activeTeam;
+        latestSyncRef.current = null;
+        latestShotRef.current = null;
         setRematchReady(0);
         setNetworkMessage("");
         setSession((value) => value + 1);
       });
-      socket.connect();
+      socket.connect(resumePrevious);
     } catch {
+      setReconnecting(false);
       setRoomPending(false);
       setNetworkMessage("Could not start the realtime connection. Try again.");
       setOnlineStage(errorStage);
@@ -1153,6 +1250,16 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       }),
       "join-room",
     );
+  };
+
+  const reconnectMatch = async () => {
+    if (!matchRef.current) return;
+    connectionReadyRef.current = false;
+    setReconnecting(true);
+    setNetworkMessage("Reconnecting to your saved match...");
+    await connectRealtime(() => undefined, "disconnected", true);
+    connectionReadyRef.current = false;
+    setReconnecting(true);
   };
 
   const sharePrivateRoom = async () => {
@@ -1254,6 +1361,13 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     let remoteAim: Drag | null = null;
     const confetti: ConfettiPiece[] = [];
     const smoke: SmokeParticle[] = [];
+    const cachedSync = match && latestSyncRef.current?.matchId === match.matchId
+      ? latestSyncRef.current
+      : null;
+    if (cachedSync) {
+      applySnapshot(game, cachedSync.snapshot);
+      lastSequence = cachedSync.sequence;
+    }
 
     const celebrate = (matchWon: boolean) => {
       addConfetti(confetti, matchWon ? 260 : 90);
@@ -1307,19 +1421,13 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       const isPossessionKick = game.carrierId === body.id && ball;
 
       if (isPossessionKick) {
-        ball.vx = shot.dirX * launchSpeed;
-        ball.vy = shot.dirY * launchSpeed;
-        body.vx = 0;
-        body.vy = 0;
         game.carrierId = null;
         game.carrierOffset = null;
         game.carrierTargetOffset = null;
         game.carrierAlignDelay = 0;
-        sounds?.impact("ball", shot.pull / MAX_PULL);
-      } else {
-        body.vx = shot.dirX * launchSpeed;
-        body.vy = shot.dirY * launchSpeed;
       }
+      body.vx = shot.dirX * launchSpeed;
+      body.vy = shot.dirY * launchSpeed;
       game.lastShooterId = body.id;
 
       shotPending = false;
@@ -1329,6 +1437,14 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       sounds?.flick(shot.pull / MAX_PULL);
       syncHud();
     };
+
+    const cachedShot = match && latestShotRef.current?.matchId === match.matchId
+      ? latestShotRef.current.shot
+      : null;
+    if (cachedShot && cachedShot.sequence > lastSequence) {
+      lastSequence = cachedShot.sequence;
+      applyShot(cachedShot);
+    }
 
     const pointFromEvent = (event: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -1739,7 +1855,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         }
       }
 
-      updatePhysics(dt, now);
+      const physicsSteps = Math.max(1, Math.ceil(dt / 0.008));
+      for (let step = 0; step < physicsSteps; step += 1) {
+        updatePhysics(dt / physicsSteps, now);
+      }
       const ball = game.bodies.find((body) => body.kind === "ball");
       if (ball) updateSmokeTrail(smoke, ball, dt);
       drawGame(ctx, game, viewTeam, now, smoke, remoteAim);
@@ -1920,7 +2039,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               <li><b>Pull back</b><span>Drag opposite the direction you want the disc to travel.</span></li>
               <li><b>Read the power</b><span>A longer pull creates more force and a faster collision.</span></li>
               <li><b>Receive a pass</b><span>The ball stops with a small gap at any teammate it reaches, even from a hard hit.</span></li>
-              <li><b>Shoot the ball</b><span>A receiving player stays still on the next flick; only the ball follows your arrow.</span></li>
+              <li><b>Shoot the ball</b><span>Flick through the gap—the contact angle controls the ball. The cyan line previews its path.</span></li>
               <li><b>Break possession</b><span>An opponent collision bounces normally and ends the passing chain.</span></li>
             </ol>
             <button className={styles.playButton} type="button" onClick={() => setShowRules(false)}>LET’S PLAY</button>
@@ -2085,13 +2204,38 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         </div>
       ) : null}
 
+      {onlineStage === "matched" && reconnecting ? (
+        <div className={styles.matchOverlay}>
+          <div className={`${styles.matchCard} ${styles.searchCard}`}>
+            <div className={styles.disconnectIcon} aria-hidden="true">!</div>
+            <p className={styles.eyebrow}>CONNECTION INTERRUPTED</p>
+            <h2>Your match is saved</h2>
+            <p className={styles.matchCopy}>Automatic recovery is running. You can also reconnect immediately.</p>
+            <button className={styles.onlineButton} type="button" onClick={() => void reconnectMatch()}>
+              <span>RECONNECT NOW</span><b>GO</b>
+            </button>
+            <button className={styles.practiceButton} type="button" onClick={leaveMatch}>LEAVE MATCH</button>
+          </div>
+        </div>
+      ) : null}
+
       {onlineStage === "disconnected" ? (
         <div className={styles.matchOverlay}>
           <div className={`${styles.matchCard} ${styles.searchCard}`}>
             <div className={styles.disconnectIcon} aria-hidden="true">!</div>
-            <p className={styles.eyebrow}>MATCH ENDED</p>
-            <h2>Opponent disconnected</h2>
+            <p className={styles.eyebrow}>CONNECTION LOST</p>
+            <h2>{match ? "Reconnect to your match" : "Match unavailable"}</h2>
             <p className={styles.matchCopy}>{networkMessage || "This match is no longer active."}</p>
+            {match ? (
+              <button
+                className={styles.onlineButton}
+                type="button"
+                disabled={reconnecting}
+                onClick={() => void reconnectMatch()}
+              >
+                <span>{reconnecting ? "RECONNECTING..." : "RECONNECT MATCH"}</span><b>GO</b>
+              </button>
+            ) : null}
             <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
               <span>FIND NEW RIVAL</span><b>GO</b>
             </button>

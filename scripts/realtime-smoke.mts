@@ -1,9 +1,28 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
+import { calculatePossessionImpact } from "../src/lib/game-physics.ts";
 import { registerGameSocket } from "../src/lib/realtime-game.ts";
 
 type Frame = { event: string; payload?: Record<string, unknown> };
+
+const glancingImpact = calculatePossessionImpact(
+  { x: 100, y: 138, radius: 19, mass: 2.6 },
+  { x: 100, y: 100, radius: 12, mass: 0.7 },
+  { x: 0.35, y: -0.94 },
+  900,
+  0.98,
+);
+assert(glancingImpact);
+assert(glancingImpact.ballVx < 0);
+assert(glancingImpact.ballVy < 0);
+assert.equal(calculatePossessionImpact(
+  { x: 100, y: 138, radius: 19, mass: 2.6 },
+  { x: 100, y: 100, radius: 12, mass: 0.7 },
+  { x: 0, y: 1 },
+  900,
+  0.98,
+), null);
 
 class FakeSocket extends EventEmitter {
   readyState = 1;
@@ -109,6 +128,7 @@ assert.equal(second.latest("game:sync")?.payload?.sequence, 1);
 first.close();
 await settle();
 assert(second.latest("match:opponent-reconnecting"));
+assert.equal(second.latest("match:opponent-reconnecting")?.payload?.graceMs, 90_000);
 second.receive("game:shoot", { bodyId: "coral-0", dirX: 0, dirY: 1, pull: 35 });
 await settle();
 assert.equal(second.latest("game:error")?.payload?.message, "Waiting for your opponent to reconnect.");
