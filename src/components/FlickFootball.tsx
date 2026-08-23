@@ -10,7 +10,10 @@ const FIELD = { left: 27, right: 393, top: 42, bottom: 678 };
 const GOAL_LEFT = 157;
 const GOAL_RIGHT = 263;
 const MAX_PULL = 92;
-const MAX_SPEED = 920;
+const MAX_SPEED = 1_040;
+const BALL_RADIUS = 12;
+const BALL_WALL_RESTITUTION = 0.95;
+const BALL_COLLISION_RESTITUTION = 0.98;
 const TURN_TIME = 20;
 const PASS_GAP = 7;
 const PASS_ALIGN_DELAY = 1;
@@ -336,7 +339,7 @@ function makeBodies(): Body[] {
     player("mint-4", "mint", 4, 310, 562),
     player("mint-5", "mint", 5, 158, 470),
     player("mint-6", "mint", 6, 262, 470),
-    { id: "ball", kind: "ball", x: 210, y: 360, vx: 0, vy: 0, radius: 11, mass: 0.7 },
+    { id: "ball", kind: "ball", x: 210, y: 360, vx: 0, vy: 0, radius: BALL_RADIUS, mass: 0.7 },
   ];
 }
 
@@ -418,18 +421,18 @@ function constrainPlayerToPitch(body: Body) {
 function constrainFreeBallToPitch(ball: Body) {
   if (ball.x - ball.radius < FIELD.left) {
     ball.x = FIELD.left + ball.radius;
-    if (ball.vx < 0) ball.vx = Math.abs(ball.vx) * 0.88;
+    if (ball.vx < 0) ball.vx = Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   } else if (ball.x + ball.radius > FIELD.right) {
     ball.x = FIELD.right - ball.radius;
-    if (ball.vx > 0) ball.vx = -Math.abs(ball.vx) * 0.88;
+    if (ball.vx > 0) ball.vx = -Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   }
   const insideGoalMouth = ball.x > GOAL_LEFT && ball.x < GOAL_RIGHT;
   if (!insideGoalMouth && ball.y - ball.radius < FIELD.top) {
     ball.y = FIELD.top + ball.radius;
-    if (ball.vy < 0) ball.vy = Math.abs(ball.vy) * 0.88;
+    if (ball.vy < 0) ball.vy = Math.abs(ball.vy) * BALL_WALL_RESTITUTION;
   } else if (!insideGoalMouth && ball.y + ball.radius > FIELD.bottom) {
     ball.y = FIELD.bottom - ball.radius;
-    if (ball.vy > 0) ball.vy = -Math.abs(ball.vy) * 0.88;
+    if (ball.vy > 0) ball.vy = -Math.abs(ball.vy) * BALL_WALL_RESTITUTION;
   }
 }
 
@@ -573,11 +576,25 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.shadowColor = "rgba(0,0,0,0.38)";
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 3;
-  ctx.fillStyle = "#f8fbff";
+  const shell = ctx.createRadialGradient(
+    -ball.radius * 0.35,
+    -ball.radius * 0.42,
+    ball.radius * 0.08,
+    0,
+    0,
+    ball.radius,
+  );
+  shell.addColorStop(0, "#ffffff");
+  shell.addColorStop(0.68, "#f5f8fb");
+  shell.addColorStop(1, "#cbd3dc");
+  ctx.fillStyle = shell;
   ctx.beginPath();
   ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(12, 25, 38, 0.72)";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
   ctx.fillStyle = "#14202d";
   ctx.beginPath();
   ctx.arc(0, 0, 3.6, 0, Math.PI * 2);
@@ -842,6 +859,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const socketRef = useRef<RealtimeClient | null>(null);
   const soundRef = useRef<SoundEngine | null>(null);
   const kickoffTeamRef = useRef<Team>("mint");
+  const connectionReadyRef = useRef(true);
+  const opponentConnectedRef = useRef(true);
   const [session, setSession] = useState(0);
   const [showRules, setShowRules] = useState(false);
   const [hud, setHud] = useState<Hud>(() => toHud(makeGame()));
@@ -856,6 +875,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const [roomCode, setRoomCode] = useState(initialCode);
   const [roomPending, setRoomPending] = useState(false);
   const [roomCopied, setRoomCopied] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [opponentReconnecting, setOpponentReconnecting] = useState(false);
 
   useEffect(() => {
     if (onlineStage !== "searching") return;
@@ -877,6 +898,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     socketRef.current?.removeAllListeners();
     socketRef.current?.disconnect();
     socketRef.current = null;
+    connectionReadyRef.current = true;
+    opponentConnectedRef.current = true;
+    setReconnecting(false);
+    setOpponentReconnecting(false);
   };
 
   const connectRealtime = async (
@@ -895,8 +920,30 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setOnlineStage(errorStage);
       });
       socket.on("disconnect", () => {
+        connectionReadyRef.current = false;
+        setReconnecting(true);
         setRoomPending(false);
-        setNetworkMessage("The realtime connection ended. Start a new match.");
+        setNetworkMessage("Reconnecting to your match...");
+      });
+      socket.on("reconnect", () => {
+        setNetworkMessage("Restoring your match...");
+      });
+      socket.on("session:resumed", () => {
+        connectionReadyRef.current = true;
+        setReconnecting(false);
+        setNetworkMessage("");
+      });
+      socket.on("session:expired", ({ message }: { message?: string }) => {
+        connectionReadyRef.current = false;
+        setReconnecting(false);
+        setNetworkMessage(message || "The previous match is no longer available.");
+        setOnlineStage("disconnected");
+      });
+      socket.on("session:replaced", () => {
+        socket.disconnect();
+        connectionReadyRef.current = false;
+        setReconnecting(false);
+        setNetworkMessage("This match was resumed in another window.");
         setOnlineStage("disconnected");
       });
       socket.on("server:error", ({ message }: { message: string }) => {
@@ -905,6 +952,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setOnlineStage("disconnected");
       });
       socket.on("room:created", ({ code }: { code: string }) => {
+        connectionReadyRef.current = true;
+        setReconnecting(false);
         setRoomCode(code);
         setRoomPending(false);
         setNetworkMessage("");
@@ -921,16 +970,35 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setOnlineStage("disconnected");
       });
       socket.on("match:found", (data: MatchInfo) => {
+        connectionReadyRef.current = true;
         kickoffTeamRef.current = "mint";
         setMatch(data);
         setRoomPending(false);
         if (data.roomCode) setRoomCode(data.roomCode);
         setNetworkMessage("");
         setRematchReady(0);
+        setReconnecting(false);
+        setOpponentReconnecting(false);
+        opponentConnectedRef.current = true;
         setOnlineStage("matched");
         setSession((value) => value + 1);
       });
+      socket.on("match:resumed", () => {
+        connectionReadyRef.current = true;
+        setReconnecting(false);
+        setNetworkMessage("");
+      });
+      socket.on("match:opponent-reconnecting", () => {
+        opponentConnectedRef.current = false;
+        setOpponentReconnecting(true);
+      });
+      socket.on("match:opponent-returned", () => {
+        opponentConnectedRef.current = true;
+        setOpponentReconnecting(false);
+      });
       socket.on("match:opponent-left", () => {
+        opponentConnectedRef.current = false;
+        setOpponentReconnecting(false);
         setNetworkMessage("Your opponent left the match.");
         setOnlineStage("disconnected");
       });
@@ -938,6 +1006,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setRematchReady(ready);
       });
       socket.on("match:reset", ({ activeTeam }: { activeTeam: Team }) => {
+        connectionReadyRef.current = true;
         kickoffTeamRef.current = activeTeam;
         setRematchReady(0);
         setNetworkMessage("");
@@ -960,7 +1029,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setSearchSeconds(0);
     setOnlineStage("searching");
     await connectRealtime(
-      (socket) => socket.emit("match:find", { name: playerName.trim() || "Player" }),
+      (socket) => socket.emit("match:find", {
+        clientId: socket.clientId,
+        name: playerName.trim() || "Player",
+      }),
       "menu",
     );
   };
@@ -974,7 +1046,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setNetworkMessage("");
     setOnlineStage("waiting-room");
     await connectRealtime(
-      (socket) => socket.emit("room:create", { name: playerName.trim() || "Player" }),
+      (socket) => socket.emit("room:create", {
+        clientId: socket.clientId,
+        name: playerName.trim() || "Player",
+      }),
       "menu",
     );
   };
@@ -991,7 +1066,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setRoomPending(true);
     setNetworkMessage("");
     await connectRealtime(
-      (socket) => socket.emit("room:join", { code, name: playerName.trim() || "Player" }),
+      (socket) => socket.emit("room:join", {
+        clientId: socket.clientId,
+        code,
+        name: playerName.trim() || "Player",
+      }),
       "join-room",
     );
   };
@@ -1161,6 +1240,16 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       sounds?.unlock();
       if (game.phase !== "ready" || shotPending) return;
       if (onlineStage !== "practice" && onlineStage !== "matched") return;
+      if (onlineStage === "matched" && !connectionReadyRef.current) {
+        game.message = "RECONNECTING TO MATCH";
+        syncHud();
+        return;
+      }
+      if (onlineStage === "matched" && !opponentConnectedRef.current) {
+        game.message = "WAITING FOR OPPONENT";
+        syncHud();
+        return;
+      }
       if (onlineStage === "matched" && match?.myTeam !== game.activeTeam) {
         game.message = "OPPONENT IS AIMING";
         syncHud();
@@ -1303,14 +1392,15 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       }
 
       for (const body of game.bodies) {
+        const wallRestitution = body.kind === "ball" ? BALL_WALL_RESTITUTION : 0.86;
         if (body.x - body.radius < FIELD.left) {
           sounds?.wall(Math.abs(body.vx) / MAX_SPEED);
           body.x = FIELD.left + body.radius;
-          body.vx = Math.abs(body.vx) * 0.86;
+          body.vx = Math.abs(body.vx) * wallRestitution;
         } else if (body.x + body.radius > FIELD.right) {
           sounds?.wall(Math.abs(body.vx) / MAX_SPEED);
           body.x = FIELD.right - body.radius;
-          body.vx = -Math.abs(body.vx) * 0.86;
+          body.vx = -Math.abs(body.vx) * wallRestitution;
         }
 
         if (body.kind === "player") {
@@ -1328,11 +1418,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           if (!insideGoal && body.y - body.radius < FIELD.top) {
             sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
             body.y = FIELD.top + body.radius;
-            body.vy = Math.abs(body.vy) * 0.9;
+            body.vy = Math.abs(body.vy) * BALL_WALL_RESTITUTION;
           } else if (!insideGoal && body.y + body.radius > FIELD.bottom) {
             sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
             body.y = FIELD.bottom - body.radius;
-            body.vy = -Math.abs(body.vy) * 0.9;
+            body.vy = -Math.abs(body.vy) * BALL_WALL_RESTITUTION;
           }
         }
       }
@@ -1400,7 +1490,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               playerBody.vx - ballBody.vx,
               playerBody.vy - ballBody.vy,
             );
-            if (resolveCollision(playerBody, ballBody, 0.94) && impactSpeed > 35) {
+            if (resolveCollision(playerBody, ballBody, BALL_COLLISION_RESTITUTION) && impactSpeed > 35) {
               sounds?.impact("ball", impactSpeed / MAX_SPEED);
             }
           } else {
@@ -1408,7 +1498,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               playerBody.vx - ballBody.vx,
               playerBody.vy - ballBody.vy,
             );
-            if (resolveCollision(playerBody, ballBody, 0.94) && impactSpeed > 35) {
+            if (resolveCollision(playerBody, ballBody, BALL_COLLISION_RESTITUTION) && impactSpeed > 35) {
               sounds?.impact("ball", impactSpeed / MAX_SPEED);
             }
           }
@@ -1567,9 +1657,13 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   };
   const mintName = nameForTeam("mint");
   const coralName = nameForTeam("coral");
-  const turnMessage = onlineStage === "matched" && match?.myTeam !== hud.activeTeam && hud.phase === "ready"
-    ? "OPPONENT IS AIMING"
-    : hud.message;
+  const turnMessage = reconnecting
+    ? "RECONNECTING TO MATCH..."
+    : opponentReconnecting
+      ? "OPPONENT IS RECONNECTING..."
+      : onlineStage === "matched" && match?.myTeam !== hud.activeTeam && hud.phase === "ready"
+        ? "OPPONENT IS AIMING"
+        : hud.message;
 
   const requestRematch = () => {
     if (onlineStage === "practice") {

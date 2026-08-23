@@ -7,11 +7,22 @@ type Team = "mint" | "coral";
 
 type QueueEntry = {
   socketId: string;
+  clientId: string;
   name: string;
 };
 
 type Player = QueueEntry & {
   team: Team;
+  disconnectedAt: number | null;
+};
+
+type RelayedShot = {
+  bodyId: string;
+  dirX: number;
+  dirY: number;
+  pull: number;
+  sequence: number;
+  serverTime: number;
 };
 
 type MatchRoom = {
@@ -22,6 +33,9 @@ type MatchRoom = {
   sequence: number;
   privateCode: string | null;
   rematchVotes: Set<string>;
+  lastSnapshot: unknown | null;
+  snapshotSequence: number;
+  lastShot: RelayedShot | null;
   players: [Player, Player];
 };
 
@@ -35,6 +49,7 @@ type GameState = {
   queue: QueueEntry[];
   matches: Map<string, MatchRoom>;
   playerMatches: Map<string, string>;
+  clientMatches: Map<string, string>;
   privateRooms: Map<string, PrivateRoom>;
   privateRoomByHost: Map<string, string>;
 };
@@ -43,6 +58,7 @@ type SavedGameState = {
   queue: QueueEntry[];
   matches: Array<Omit<MatchRoom, "rematchVotes"> & { rematchVotes: string[] }>;
   playerMatches: Array<[string, string]>;
+  clientMatches: Array<[string, string]>;
   privateRooms: Array<[string, PrivateRoom]>;
   privateRoomByHost: Array<[string, string]>;
 };
@@ -62,6 +78,7 @@ type LocalHub = {
   instanceId: string;
   sockets: Map<string, WebSocket>;
   socketIds: Map<WebSocket, string>;
+  socketTasks: Map<string, Promise<void>>;
   memoryState: GameState;
   streamClient: Redis | null;
   streaming: boolean;
@@ -70,11 +87,12 @@ type LocalHub = {
 };
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const STATE_KEY = "flickxi:v1:state";
-const STATE_LOCK_KEY = "flickxi:v1:state-lock";
-const EVENT_STREAM = "flickxi:v1:events";
-const CONNECTION_PREFIX = "flickxi:v1:connection:";
+const STATE_KEY = "flickxi:v2:state";
+const STATE_LOCK_KEY = "flickxi:v2:state-lock";
+const EVENT_STREAM = "flickxi:v2:events";
+const CONNECTION_PREFIX = "flickxi:v2:connection:";
 const CONNECTION_TTL_SECONDS = 35;
+const RECONNECT_GRACE_MS = 30_000;
 const HEARTBEAT_MS = 10_000;
 const STREAM_BLOCK_MS = 5_000;
 const STREAM_MAX_LENGTH = 2_000;
@@ -88,6 +106,7 @@ function createGameState(): GameState {
     queue: [],
     matches: new Map(),
     playerMatches: new Map(),
+    clientMatches: new Map(),
     privateRooms: new Map(),
     privateRoomByHost: new Map(),
   };
@@ -98,12 +117,14 @@ const hub: LocalHub = globalForRealtime.__flickXiHub ??
     instanceId: randomUUID(),
     sockets: new Map(),
     socketIds: new Map(),
+    socketTasks: new Map(),
     memoryState: createGameState(),
     streamClient: null,
     streaming: false,
     lastEventId: "0-0",
     heartbeat: null,
   });
+hub.socketTasks ??= new Map();
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -119,6 +140,7 @@ function serializeState(state: GameState) {
       rematchVotes: [...room.rematchVotes],
     })),
     playerMatches: [...state.playerMatches],
+    clientMatches: [...state.clientMatches],
     privateRooms: [...state.privateRooms],
     privateRoomByHost: [...state.privateRoomByHost],
   };
@@ -136,6 +158,7 @@ function deserializeState(raw: string | null): GameState {
         { ...room, rematchVotes: new Set(room.rematchVotes) },
       ])),
       playerMatches: new Map(Array.isArray(saved.playerMatches) ? saved.playerMatches : []),
+      clientMatches: new Map(Array.isArray(saved.clientMatches) ? saved.clientMatches : []),
       privateRooms: new Map(Array.isArray(saved.privateRooms) ? saved.privateRooms : []),
       privateRoomByHost: new Map(Array.isArray(saved.privateRoomByHost) ? saved.privateRoomByHost : []),
     };
@@ -241,9 +264,19 @@ function safeName(value: unknown, fallback: string) {
   return clean || fallback;
 }
 
+function safeClientId(value: unknown, socketId: string) {
+  if (typeof value !== "string") return `legacy-${socketId}`;
+  const clean = value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+  return clean.length >= 12 ? clean : `legacy-${socketId}`;
+}
+
 function removeFromQueue(state: GameState, socketId: string) {
   const index = state.queue.findIndex((entry) => entry.socketId === socketId);
   if (index >= 0) state.queue.splice(index, 1);
+}
+
+function removeClientFromQueue(state: GameState, clientId: string) {
+  state.queue = state.queue.filter((entry) => entry.clientId !== clientId);
 }
 
 function removePrivateRoomForHost(
@@ -279,6 +312,19 @@ function publicPlayer(player: Player) {
   return { name: player.name, team: player.team };
 }
 
+function matchInfo(room: MatchRoom, player: Player) {
+  const opponent = room.players.find((candidate) => candidate.clientId !== player.clientId);
+  if (!opponent) return null;
+  return {
+    matchId: room.id,
+    myTeam: player.team,
+    player: publicPlayer(player),
+    opponent: publicPlayer(opponent),
+    startsAt: Date.now() + 250,
+    roomCode: room.privateCode,
+  };
+}
+
 function startMatch(
   state: GameState,
   firstEntry: QueueEntry,
@@ -295,26 +341,24 @@ function startMatch(
     sequence: 0,
     privateCode,
     rematchVotes: new Set(),
+    lastSnapshot: null,
+    snapshotSequence: 0,
+    lastShot: null,
     players: [
-      { ...firstEntry, team: "mint" },
-      { ...secondEntry, team: "coral" },
+      { ...firstEntry, team: "mint", disconnectedAt: null },
+      { ...secondEntry, team: "coral", disconnectedAt: null },
     ],
   };
 
   state.matches.set(matchId, room);
-  for (const player of room.players) state.playerMatches.set(player.socketId, matchId);
+  for (const player of room.players) {
+    state.playerMatches.set(player.socketId, matchId);
+    state.clientMatches.set(player.clientId, matchId);
+  }
 
   for (const player of room.players) {
-    const opponent = room.players.find((candidate) => candidate.socketId !== player.socketId);
-    if (!opponent) continue;
-    outbound.push(direct(player.socketId, "match:found", {
-      matchId,
-      myTeam: player.team,
-      player: publicPlayer(player),
-      opponent: publicPlayer(opponent),
-      startsAt: Date.now() + 750,
-      roomCode: privateCode,
-    }));
+    const info = matchInfo(room, player);
+    if (info) outbound.push(direct(player.socketId, "match:found", info));
   }
 }
 
@@ -378,17 +422,111 @@ function getRoom(state: GameState, socketId: string) {
   return matchId ? state.matches.get(matchId) ?? null : null;
 }
 
+function deleteMatch(state: GameState, room: MatchRoom) {
+  for (const player of room.players) {
+    state.playerMatches.delete(player.socketId);
+    state.clientMatches.delete(player.clientId);
+  }
+  state.matches.delete(room.id);
+}
+
+function leaveMatch(state: GameState, socketId: string) {
+  const outbound: OutboundEvent[] = [];
+  const room = getRoom(state, socketId);
+  if (!room) return outbound;
+  const opponent = room.players.find((candidate) => candidate.socketId !== socketId);
+  if (opponent) outbound.push(direct(opponent.socketId, "match:opponent-left"));
+  deleteMatch(state, room);
+  return outbound;
+}
+
+async function resumeSession(
+  state: GameState,
+  socketId: string,
+  value: Record<string, unknown>,
+) {
+  const outbound: OutboundEvent[] = [];
+  const clientId = safeClientId(value.clientId, socketId);
+  const reconnecting = value.reconnecting === true;
+  const matchId = state.clientMatches.get(clientId);
+  const room = matchId ? state.matches.get(matchId) : null;
+  const player = room?.players.find((candidate) => candidate.clientId === clientId);
+
+  if (room && player) {
+    if (player.disconnectedAt && Date.now() - player.disconnectedAt > RECONNECT_GRACE_MS) {
+      const opponent = room.players.find((candidate) => candidate.clientId !== clientId);
+      if (opponent) outbound.push(direct(opponent.socketId, "match:opponent-left"));
+      deleteMatch(state, room);
+      outbound.push(direct(socketId, "session:expired", { message: "Reconnect time expired." }));
+      return outbound;
+    }
+
+    const previousSocketId = player.socketId;
+    state.playerMatches.delete(previousSocketId);
+    player.socketId = socketId;
+    player.disconnectedAt = null;
+    state.playerMatches.set(socketId, room.id);
+    if (room.rematchVotes.delete(previousSocketId)) room.rematchVotes.add(socketId);
+    if (previousSocketId !== socketId) {
+      outbound.push(direct(previousSocketId, "session:replaced"));
+    }
+    const info = matchInfo(room, player);
+    outbound.push(direct(socketId, "session:resumed", { scope: "match" }));
+    if (info) outbound.push(direct(socketId, "match:resumed", info));
+    const opponent = room.players.find((candidate) => candidate.clientId !== clientId);
+    if (opponent) outbound.push(direct(opponent.socketId, "match:opponent-returned"));
+    if (room.lastSnapshot) {
+      outbound.push(direct(socketId, "game:sync", {
+        snapshot: room.lastSnapshot,
+        sequence: room.snapshotSequence,
+        serverTime: Date.now(),
+      }));
+    }
+    if (room.lastShot) outbound.push(direct(socketId, "game:shot", room.lastShot));
+    return outbound;
+  }
+
+  const queued = state.queue.find((entry) => entry.clientId === clientId);
+  if (queued) {
+    state.playerMatches.delete(queued.socketId);
+    queued.socketId = socketId;
+    outbound.push(direct(socketId, "session:resumed", { scope: "queue" }));
+    outbound.push(direct(socketId, "match:searching", { position: state.queue.indexOf(queued) + 1 }));
+    return outbound;
+  }
+
+  const privateRoom = [...state.privateRooms.values()]
+    .find((candidate) => candidate.host.clientId === clientId);
+  if (privateRoom) {
+    state.privateRoomByHost.delete(privateRoom.host.socketId);
+    privateRoom.host.socketId = socketId;
+    state.privateRoomByHost.set(socketId, privateRoom.code);
+    outbound.push(direct(socketId, "session:resumed", { scope: "room" }));
+    outbound.push(direct(socketId, "room:created", { code: privateRoom.code }));
+    return outbound;
+  }
+
+  outbound.push(direct(socketId, reconnecting ? "session:expired" : "session:ready", {
+    message: reconnecting ? "The previous match is no longer available." : undefined,
+  }));
+  return outbound;
+}
+
 async function handleEvent(state: GameState, socketId: string, event: string, payload: unknown) {
   const outbound: OutboundEvent[] = [];
   const value = record(payload);
 
   switch (event) {
+    case "session:resume":
+      return resumeSession(state, socketId, value);
     case "match:find": {
       if (state.playerMatches.has(socketId)) return outbound;
+      const clientId = safeClientId(value.clientId, socketId);
       removeFromQueue(state, socketId);
+      removeClientFromQueue(state, clientId);
       removePrivateRoomForHost(state, socketId, outbound, false);
       const fallback = `Player ${socketId.slice(0, 4).toUpperCase()}`;
-      state.queue.push({ socketId, name: safeName(value.name, fallback) });
+      state.queue.push({ socketId, clientId, name: safeName(value.name, fallback) });
       outbound.push(direct(socketId, "match:searching", { position: state.queue.length }));
       await attemptMatchmaking(state, outbound);
       return outbound;
@@ -399,13 +537,15 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       return outbound;
     case "room:create": {
       if (state.playerMatches.has(socketId)) return outbound;
+      const clientId = safeClientId(value.clientId, socketId);
       removeFromQueue(state, socketId);
+      removeClientFromQueue(state, clientId);
       removePrivateRoomForHost(state, socketId, outbound, false);
       const fallback = `Player ${socketId.slice(0, 4).toUpperCase()}`;
       const code = createRoomCode(state);
       state.privateRooms.set(code, {
         code,
-        host: { socketId, name: safeName(value.name, fallback) },
+        host: { socketId, clientId, name: safeName(value.name, fallback) },
         createdAt: Date.now(),
       });
       state.privateRoomByHost.set(socketId, code);
@@ -414,7 +554,9 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
     }
     case "room:join": {
       if (state.playerMatches.has(socketId)) return outbound;
+      const clientId = safeClientId(value.clientId, socketId);
       removeFromQueue(state, socketId);
+      removeClientFromQueue(state, clientId);
       const code = cleanRoomCode(value.code);
       if (code.length !== 6) {
         outbound.push(direct(socketId, "room:error", {
@@ -436,7 +578,7 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
         }));
         return outbound;
       }
-      if (privateRoom.host.socketId === socketId) {
+      if (privateRoom.host.clientId === clientId) {
         outbound.push(direct(socketId, "room:error", {
           action: "join",
           message: "Share this code with a different player.",
@@ -444,7 +586,7 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
         return outbound;
       }
       const fallback = `Player ${socketId.slice(0, 4).toUpperCase()}`;
-      const guest = { socketId, name: safeName(value.name, fallback) };
+      const guest = { socketId, clientId, name: safeName(value.name, fallback) };
       state.privateRooms.delete(code);
       state.privateRoomByHost.delete(privateRoom.host.socketId);
       startMatch(state, privateRoom.host, guest, outbound, code);
@@ -457,6 +599,12 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
     case "game:shoot": {
       const room = getRoom(state, socketId);
       if (!room || room.shotInProgress || room.finished) return outbound;
+      if (room.players.some((player) => player.disconnectedAt !== null)) {
+        outbound.push(direct(socketId, "game:error", {
+          message: "Waiting for your opponent to reconnect.",
+        }));
+        return outbound;
+      }
       const player = room.players.find((candidate) => candidate.socketId === socketId);
       if (!player || player.team !== room.activeTeam) {
         outbound.push(direct(socketId, "game:error", { message: "It is not your turn." }));
@@ -469,11 +617,12 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       }
       room.shotInProgress = true;
       room.sequence += 1;
-      outbound.push(toMatch(room, "game:shot", {
+      room.lastShot = {
         ...shot,
         sequence: room.sequence,
         serverTime: Date.now(),
-      }));
+      };
+      outbound.push(toMatch(room, "game:shot", room.lastShot));
       return outbound;
     }
     case "game:settled": {
@@ -485,6 +634,9 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       room.activeTeam = snapshot.activeTeam as Team;
       room.finished = snapshot.phase === "finished";
       room.shotInProgress = false;
+      room.lastSnapshot = value.snapshot;
+      room.snapshotSequence = room.sequence;
+      room.lastShot = null;
       outbound.push(toMatch(room, "game:sync", {
         snapshot: value.snapshot,
         sequence: room.sequence,
@@ -506,6 +658,9 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
         room.finished = false;
         room.rematchVotes.clear();
         room.sequence += 1;
+        room.lastSnapshot = null;
+        room.snapshotSequence = room.sequence;
+        room.lastShot = null;
         outbound.push(toMatch(room, "match:reset", {
           activeTeam: room.activeTeam,
           sequence: room.sequence,
@@ -514,6 +669,7 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       return outbound;
     }
     case "match:leave":
+      outbound.push(...leaveMatch(state, socketId));
       hub.sockets.get(socketId)?.close(1000, "Player left match");
       return outbound;
     default:
@@ -530,10 +686,16 @@ function cleanupState(state: GameState, socketId: string) {
   if (!matchId) return outbound;
   const room = state.matches.get(matchId);
   if (room) {
-    const opponent = room.players.find((candidate) => candidate.socketId !== socketId);
-    if (opponent) outbound.push(direct(opponent.socketId, "match:opponent-left"));
-    for (const player of room.players) state.playerMatches.delete(player.socketId);
-    state.matches.delete(matchId);
+    const player = room.players.find((candidate) => candidate.socketId === socketId);
+    if (!player) return outbound;
+    state.playerMatches.delete(socketId);
+    player.disconnectedAt = Date.now();
+    const opponent = room.players.find((candidate) => candidate.clientId !== player.clientId);
+    if (opponent) {
+      outbound.push(direct(opponent.socketId, "match:opponent-reconnecting", {
+        graceMs: RECONNECT_GRACE_MS,
+      }));
+    }
   }
   return outbound;
 }
@@ -549,14 +711,28 @@ async function pruneDisconnected(state: GameState) {
     state.privateRoomByHost.delete(room.host.socketId);
   }
 
-  for (const [matchId, room] of state.matches) {
+  for (const room of state.matches.values()) {
     const alive = await Promise.all(room.players.map((player) => connectionIsAlive(player.socketId)));
-    if (alive.every(Boolean)) continue;
     room.players.forEach((player, index) => {
-      state.playerMatches.delete(player.socketId);
+      if (!alive[index] && player.disconnectedAt === null) {
+        state.playerMatches.delete(player.socketId);
+        player.disconnectedAt = Date.now();
+        const opponent = room.players[1 - index];
+        if (alive[1 - index]) {
+          outbound.push(direct(opponent.socketId, "match:opponent-reconnecting", {
+            graceMs: RECONNECT_GRACE_MS,
+          }));
+        }
+      }
+    });
+    const expired = room.players.some((player) =>
+      player.disconnectedAt !== null && Date.now() - player.disconnectedAt > RECONNECT_GRACE_MS
+    );
+    if (!expired) continue;
+    room.players.forEach((player, index) => {
       if (alive[index]) outbound.push(direct(player.socketId, "match:opponent-left"));
     });
-    state.matches.delete(matchId);
+    deleteMatch(state, room);
   }
   return outbound;
 }
@@ -619,9 +795,8 @@ async function runEventStream() {
 }
 
 async function heartbeat() {
-  if (!realtimeRedis) return;
   try {
-    await Promise.all([...hub.sockets.keys()].map(touchConnection));
+    if (realtimeRedis) await Promise.all([...hub.sockets.keys()].map(touchConnection));
     await withGameState(pruneDisconnected);
   } catch (error) {
     console.error("[FlickXI] Realtime heartbeat failed", error);
@@ -629,8 +804,8 @@ async function heartbeat() {
 }
 
 function startRedisInfrastructure() {
-  if (!realtimeRedis) return;
   if (!hub.heartbeat) hub.heartbeat = setInterval(() => void heartbeat(), HEARTBEAT_MS);
+  if (!realtimeRedis) return;
   if (hub.streaming) return;
   hub.streaming = true;
   hub.streamClient = realtimeRedis.duplicate();
@@ -653,6 +828,7 @@ function stopRedisInfrastructure() {
 async function unregisterGameSocket(socket: WebSocket) {
   const socketId = hub.socketIds.get(socket);
   if (!socketId) return;
+  await hub.socketTasks.get(socketId)?.catch(() => undefined);
   hub.socketIds.delete(socket);
   hub.sockets.delete(socketId);
   if (realtimeRedis) await realtimeRedis.del(`${CONNECTION_PREFIX}${socketId}`);
@@ -673,7 +849,14 @@ export function registerGameSocket(socket: WebSocket) {
     console.error("[FlickXI] Could not register realtime connection", error);
   });
 
-  socket.on("message", (data) => void processClientFrame(socketId, data));
+  socket.on("message", (data) => {
+    const previous = hub.socketTasks.get(socketId) ?? Promise.resolve();
+    const task = previous.then(() => processClientFrame(socketId, data));
+    hub.socketTasks.set(socketId, task);
+    void task.finally(() => {
+      if (hub.socketTasks.get(socketId) === task) hub.socketTasks.delete(socketId);
+    });
+  });
   let unregistered = false;
   const unregister = () => {
     if (unregistered) return;

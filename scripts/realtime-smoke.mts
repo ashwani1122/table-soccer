@@ -50,10 +50,14 @@ function snapshot(activeTeam: "mint" | "coral", phase = "ready") {
   };
 }
 
-const first = connect();
+const firstClientId = "smoke-first-client";
+const secondClientId = "smoke-second-client";
+let first = connect();
 const second = connect();
-first.receive("match:find", { name: "First" });
-second.receive("match:find", { name: "Second" });
+first.receive("session:resume", { clientId: firstClientId, reconnecting: false });
+second.receive("session:resume", { clientId: secondClientId, reconnecting: false });
+first.receive("match:find", { clientId: firstClientId, name: "First" });
+second.receive("match:find", { clientId: secondClientId, name: "Second" });
 await settle();
 
 const firstMatch = first.latest("match:found");
@@ -76,6 +80,22 @@ first.receive("game:settled", {
 await settle();
 assert.equal(second.latest("game:sync")?.payload?.sequence, 1);
 
+first.close();
+await settle();
+assert(second.latest("match:opponent-reconnecting"));
+second.receive("game:shoot", { bodyId: "coral-0", dirX: 0, dirY: 1, pull: 35 });
+await settle();
+assert.equal(second.latest("game:error")?.payload?.message, "Waiting for your opponent to reconnect.");
+
+first = connect();
+first.receive("session:resume", { clientId: firstClientId, reconnecting: true });
+await settle();
+assert.equal(first.latest("session:resumed")?.payload?.scope, "match");
+assert.equal(first.latest("match:resumed")?.payload?.matchId, firstMatch.payload.matchId);
+assert.equal(first.latest("match:resumed")?.payload?.myTeam, "mint");
+assert.equal(first.latest("game:sync")?.payload?.sequence, 1);
+assert(second.latest("match:opponent-returned"));
+
 second.receive("game:shoot", { bodyId: "coral-0", dirX: 0, dirY: 1, pull: 35 });
 await settle();
 second.receive("game:settled", {
@@ -89,21 +109,24 @@ await settle();
 assert.equal(first.latest("match:reset")?.payload?.sequence, 3);
 assert.equal(second.latest("match:reset")?.payload?.sequence, 3);
 
-first.close();
+first.receive("match:leave");
+await settle();
 second.close();
 
 const host = connect();
 const guest = connect();
-host.receive("room:create", { name: "Host" });
+host.receive("session:resume", { clientId: "smoke-private-host", reconnecting: false });
+guest.receive("session:resume", { clientId: "smoke-private-guest", reconnecting: false });
+host.receive("room:create", { clientId: "smoke-private-host", name: "Host" });
 await settle();
 const code = host.latest("room:created")?.payload?.code;
 assert.equal(typeof code, "string");
 assert.equal(String(code).length, 6);
-guest.receive("room:join", { name: "Guest", code });
+guest.receive("room:join", { clientId: "smoke-private-guest", name: "Guest", code });
 await settle();
 assert.equal(host.latest("match:found")?.payload?.roomCode, code);
 assert.equal(guest.latest("match:found")?.payload?.roomCode, code);
 
 host.close();
 guest.close();
-console.log("Realtime matchmaking, gameplay relay, rematch, and private-room checks passed.");
+console.log("Realtime matchmaking, reconnect recovery, gameplay relay, rematch, and private-room checks passed.");
