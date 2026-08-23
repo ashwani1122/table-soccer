@@ -1805,27 +1805,38 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       if (game.carrierId && game.carrierOffset) {
         const carrier = game.bodies.find((body) => body.id === game.carrierId);
         if (carrier) {
-          if (game.carrierTargetOffset) {
+          const targetOffset = game.carrierTargetOffset;
+          if (targetOffset) {
             game.carrierAlignDelay = Math.max(0, game.carrierAlignDelay - dt);
             if (game.carrierAlignDelay === 0) {
-              game.carrierOffset = rotateToward(
+              const nextOffset = rotateToward(
                 game.carrierOffset,
-                game.carrierTargetOffset,
+                targetOffset,
                 6 * dt,
               );
+              const aligned = Math.hypot(
+                nextOffset.x - targetOffset.x,
+                nextOffset.y - targetOffset.y,
+              ) <= 0.015;
+              game.carrierOffset = aligned ? { ...targetOffset } : nextOffset;
+
+              // The ball is the pivot: move the disc around it until the ball
+              // sits between the disc and the opponent's goal.
+              const controlDistance = carrier.radius + ball.radius + PASS_GAP;
+              carrier.x = ball.x - game.carrierOffset.x * controlDistance;
+              carrier.y = ball.y - game.carrierOffset.y * controlDistance;
+              carrier.vx = 0;
+              carrier.vy = 0;
+              ball.vx = 0;
+              ball.vy = 0;
+              constrainPlayerToPitch(carrier);
+
+              if (aligned) game.carrierTargetOffset = null;
+            } else {
+              lockBallToCarrier(carrier, ball, game.carrierOffset);
             }
-          }
-          lockBallToCarrier(carrier, ball, game.carrierOffset);
-          if (
-            game.carrierTargetOffset &&
-            game.carrierAlignDelay === 0 &&
-            Math.hypot(
-              game.carrierOffset.x - game.carrierTargetOffset.x,
-              game.carrierOffset.y - game.carrierTargetOffset.y,
-            ) <= 0.015
-          ) {
-            game.carrierOffset = { ...game.carrierTargetOffset };
-            game.carrierTargetOffset = null;
+          } else {
+            lockBallToCarrier(carrier, ball, game.carrierOffset);
           }
         }
       }
