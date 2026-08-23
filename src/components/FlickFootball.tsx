@@ -18,6 +18,8 @@ const TURN_TIME = 20;
 const PASS_GAP = 7;
 const PASS_ALIGN_DELAY = 1;
 const RESULT_HOME_DELAY = 3_000;
+const AIM_BROADCAST_MS = 60;
+const SMOKE_MIN_SPEED = 150;
 
 type Team = "mint" | "coral";
 type Phase = "ready" | "moving" | "goal" | "finished";
@@ -33,6 +35,7 @@ type Body = {
   radius: number;
   mass: number;
   number?: number;
+  rotation?: number;
 };
 
 type Drag = {
@@ -127,6 +130,16 @@ type ConfettiPiece = {
   spin: number;
   life: number;
   color: string;
+};
+
+type SmokeParticle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  life: number;
+  maxLife: number;
 };
 
 const TEAM_META = {
@@ -321,6 +334,53 @@ function updateAndDrawConfetti(
   }
 }
 
+function updateSmokeTrail(particles: SmokeParticle[], ball: Body, dt: number) {
+  for (let index = particles.length - 1; index >= 0; index -= 1) {
+    const particle = particles[index];
+    if (!particle) continue;
+    particle.life -= dt;
+    particle.x += particle.vx * dt;
+    particle.y += particle.vy * dt;
+    particle.vx *= Math.exp(-3.2 * dt);
+    particle.vy *= Math.exp(-3.2 * dt);
+    particle.radius += 8 * dt;
+    if (particle.life <= 0) particles.splice(index, 1);
+  }
+
+  const ballSpeed = speed(ball);
+  if (ballSpeed < SMOKE_MIN_SPEED) return;
+  const emissionChance = Math.min(1, dt * (18 + ballSpeed / 45));
+  if (Math.random() > emissionChance) return;
+
+  const directionX = ball.vx / ballSpeed;
+  const directionY = ball.vy / ballSpeed;
+  const sideways = (Math.random() - 0.5) * ball.radius * 0.9;
+  const maxLife = 0.32 + Math.random() * 0.24;
+  particles.push({
+    x: ball.x - directionX * (ball.radius + 3) - directionY * sideways,
+    y: ball.y - directionY * (ball.radius + 3) + directionX * sideways,
+    vx: -directionX * (18 + Math.random() * 18),
+    vy: -directionY * (18 + Math.random() * 18) - 4,
+    radius: 2.4 + Math.random() * 2.4,
+    life: maxLife,
+    maxLife,
+  });
+  if (particles.length > 48) particles.splice(0, particles.length - 48);
+}
+
+function drawSmokeTrail(ctx: CanvasRenderingContext2D, particles: SmokeParticle[]) {
+  ctx.save();
+  for (const particle of particles) {
+    const progress = clamp(particle.life / particle.maxLife, 0, 1);
+    ctx.globalAlpha = progress * 0.28;
+    ctx.fillStyle = "#dce8ed";
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function player(id: string, team: Team, number: number, x: number, y: number): Body {
   return { id, kind: "player", team, number, x, y, vx: 0, vy: 0, radius: 19, mass: 2.6 };
 }
@@ -339,7 +399,17 @@ function makeBodies(): Body[] {
     player("mint-4", "mint", 4, 310, 562),
     player("mint-5", "mint", 5, 158, 470),
     player("mint-6", "mint", 6, 262, 470),
-    { id: "ball", kind: "ball", x: 210, y: 360, vx: 0, vy: 0, radius: BALL_RADIUS, mass: 0.7 },
+    {
+      id: "ball",
+      kind: "ball",
+      x: 210,
+      y: 360,
+      vx: 0,
+      vy: 0,
+      radius: BALL_RADIUS,
+      mass: 0.7,
+      rotation: 0,
+    },
   ];
 }
 
@@ -573,6 +643,7 @@ function drawPitch(ctx: CanvasRenderingContext2D) {
 function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.save();
   ctx.translate(ball.x, ball.y);
+  ctx.rotate(ball.rotation ?? 0);
   ctx.shadowColor = "rgba(0,0,0,0.38)";
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 3;
@@ -724,7 +795,14 @@ function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body) {
   ctx.restore();
 }
 
-function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team, animationTime: number) {
+function drawGame(
+  ctx: CanvasRenderingContext2D,
+  game: Game,
+  viewTeam: Team,
+  animationTime: number,
+  smoke: SmokeParticle[],
+  remoteAim: Drag | null,
+) {
   const flipped = viewTeam === "coral";
   ctx.save();
   if (flipped) {
@@ -732,14 +810,16 @@ function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team, ani
     ctx.rotate(Math.PI);
   }
   drawPitch(ctx);
+  drawSmokeTrail(ctx, smoke);
   const ball = game.bodies.find((body) => body.kind === "ball");
+  const visibleAim = game.drag ?? remoteAim;
   for (const body of game.bodies) {
     if (body.kind === "player") {
       drawPlayer(
         ctx,
         body,
         game.activeTeam,
-        game.drag !== null,
+        visibleAim !== null,
         game.carrierId === body.id,
         flipped,
         animationTime,
@@ -748,9 +828,9 @@ function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team, ani
   }
   if (ball) drawBall(ctx, ball);
 
-  if (game.drag) {
-    const body = game.bodies.find((item) => item.id === game.drag?.bodyId);
-    if (body) drawAim(ctx, game.drag, body);
+  if (visibleAim) {
+    const body = game.bodies.find((item) => item.id === visibleAim.bodyId);
+    if (body) drawAim(ctx, visibleAim, body);
   }
   ctx.restore();
 
@@ -1170,7 +1250,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     let lastHudKey = "";
     let shotPending = false;
     let lastSequence = -1;
+    let lastAimBroadcast = 0;
+    let remoteAim: Drag | null = null;
     const confetti: ConfettiPiece[] = [];
+    const smoke: SmokeParticle[] = [];
 
     const celebrate = (matchWon: boolean) => {
       addConfetti(confetti, matchWon ? 260 : 90);
@@ -1193,6 +1276,23 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         matchId: match.matchId,
         snapshot: makeSnapshot(game),
       });
+    };
+
+    const broadcastAim = (drag: Drag, force = false) => {
+      if (onlineStage !== "matched" || !match) return;
+      const now = performance.now();
+      if (!force && now - lastAimBroadcast < AIM_BROADCAST_MS) return;
+      lastAimBroadcast = now;
+      socketRef.current?.emit("game:aim", {
+        bodyId: drag.bodyId,
+        dirX: drag.dirX,
+        dirY: drag.dirY,
+        pull: drag.pull,
+      });
+    };
+
+    const clearBroadcastAim = () => {
+      if (onlineStage === "matched") socketRef.current?.emit("game:aim-clear");
     };
 
     const applyShot = (shot: Shot) => {
@@ -1261,14 +1361,16 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         .find((body) => Math.hypot(point.x - body.x, point.y - body.y) <= body.radius + 12);
       if (!selectable) return;
       canvas.setPointerCapture(event.pointerId);
+      const defaultDirectionY = selectable.team === "mint" ? -1 : 1;
       game.drag = {
         bodyId: selectable.id,
         pointerX: point.x,
         pointerY: point.y,
         pull: 0,
         dirX: 0,
-        dirY: -1,
+        dirY: defaultDirectionY,
       };
+      broadcastAim(game.drag, true);
       game.message = "PULL BACK TO AIM";
       syncHud();
     };
@@ -1287,12 +1389,14 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       game.drag.pull = pull;
       game.drag.dirX = rawX / Math.max(distance, 0.001);
       game.drag.dirY = rawY / Math.max(distance, 0.001);
+      broadcastAim(game.drag);
     };
 
     const onPointerUp = (event: PointerEvent) => {
       if (!game.drag) return;
       const drag = game.drag;
       game.drag = null;
+      clearBroadcastAim();
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
       if (drag.pull < 8) {
         game.message = "PULL A LITTLE FURTHER";
@@ -1317,15 +1421,30 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     canvas.addEventListener("pointercancel", onPointerUp);
 
     const socket = socketRef.current;
+    const onRemoteAim = (aim: Shot) => {
+      if (game.phase !== "ready") return;
+      const body = game.bodies.find((item) => item.id === aim.bodyId);
+      if (!body || body.kind !== "player" || body.team !== game.activeTeam) return;
+      remoteAim = {
+        ...aim,
+        pointerX: body.x - aim.dirX * aim.pull,
+        pointerY: body.y - aim.dirY * aim.pull,
+      };
+    };
+    const onRemoteAimClear = () => {
+      remoteAim = null;
+    };
     const onRemoteShot = (shot: Shot & { sequence: number }) => {
       if (shot.sequence <= lastSequence) return;
       lastSequence = shot.sequence;
+      remoteAim = null;
       applyShot(shot);
     };
     const onRemoteSync = ({ snapshot, sequence }: { snapshot: GameSnapshot; sequence: number }) => {
       if (sequence < lastSequence) return;
       lastSequence = sequence;
       shotPending = false;
+      remoteAim = null;
       const previousPhase = game.phase;
       applySnapshot(game, snapshot);
       if (previousPhase !== snapshot.phase && (snapshot.phase === "goal" || snapshot.phase === "finished")) {
@@ -1338,6 +1457,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       game.message = message.toUpperCase();
       syncHud();
     };
+    socket?.on("game:aim", onRemoteAim);
+    socket?.on("game:aim-clear", onRemoteAimClear);
     socket?.on("game:shot", onRemoteShot);
     socket?.on("game:sync", onRemoteSync);
     socket?.on("game:error", onGameError);
@@ -1381,8 +1502,17 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
 
       const damping = Math.exp(-2.0 * dt);
       for (const body of game.bodies) {
-        body.x += body.vx * dt;
-        body.y += body.vy * dt;
+        const travelX = body.vx * dt;
+        const travelY = body.vy * dt;
+        body.x += travelX;
+        body.y += travelY;
+        if (body.kind === "ball") {
+          const rollDirection = Math.abs(travelX) >= Math.abs(travelY)
+            ? Math.sign(travelX)
+            : -Math.sign(travelY);
+          body.rotation = (body.rotation ?? 0) +
+            (Math.hypot(travelX, travelY) / body.radius) * rollDirection;
+        }
         body.vx *= damping;
         body.vy *= damping;
         if (speed(body) < 5) {
@@ -1607,7 +1737,9 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       }
 
       updatePhysics(dt, now);
-      drawGame(ctx, game, viewTeam, now);
+      const ball = game.bodies.find((body) => body.kind === "ball");
+      if (ball) updateSmokeTrail(smoke, ball, dt);
+      drawGame(ctx, game, viewTeam, now, smoke, remoteAim);
       updateAndDrawConfetti(ctx, confetti, dt);
       frameId = requestAnimationFrame(loop);
     };
@@ -1621,6 +1753,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
+      socket?.off("game:aim", onRemoteAim);
+      socket?.off("game:aim-clear", onRemoteAimClear);
       socket?.off("game:shot", onRemoteShot);
       socket?.off("game:sync", onRemoteSync);
       socket?.off("game:error", onGameError);

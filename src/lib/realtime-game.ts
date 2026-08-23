@@ -401,6 +401,24 @@ function validShot(payload: unknown, team: Team) {
   };
 }
 
+function validAim(payload: unknown, team: Team) {
+  const value = record(payload);
+  const bodyId = typeof value.bodyId === "string" ? value.bodyId : "";
+  const dirX = Number(value.dirX);
+  const dirY = Number(value.dirY);
+  const pull = Number(value.pull);
+  if (!bodyId.startsWith(`${team}-`)) return null;
+  if (![dirX, dirY, pull].every(Number.isFinite)) return null;
+  const length = Math.hypot(dirX, dirY);
+  if (length < 0.8 || length > 1.2 || pull < 0 || pull > 92.5) return null;
+  return {
+    bodyId,
+    dirX: dirX / length,
+    dirY: dirY / length,
+    pull: Math.min(92, pull),
+  };
+}
+
 function validSnapshot(snapshot: unknown) {
   const value = record(snapshot);
   const score = record(value.score);
@@ -596,6 +614,32 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       removePrivateRoomForHost(state, socketId, outbound);
       outbound.push(direct(socketId, "room:cancelled"));
       return outbound;
+    case "game:aim": {
+      const room = getRoom(state, socketId);
+      if (!room || room.shotInProgress || room.finished) return outbound;
+      if (room.players.some((player) => player.disconnectedAt !== null)) return outbound;
+      const player = room.players.find((candidate) => candidate.socketId === socketId);
+      if (!player || player.team !== room.activeTeam) return outbound;
+      const aim = validAim(payload, player.team);
+      if (!aim) return outbound;
+      const opponent = room.players.find((candidate) => candidate.socketId !== socketId);
+      if (opponent) {
+        outbound.push(direct(opponent.socketId, "game:aim", {
+          ...aim,
+          serverTime: Date.now(),
+        }));
+      }
+      return outbound;
+    }
+    case "game:aim-clear": {
+      const room = getRoom(state, socketId);
+      if (!room) return outbound;
+      const player = room.players.find((candidate) => candidate.socketId === socketId);
+      if (!player || player.team !== room.activeTeam) return outbound;
+      const opponent = room.players.find((candidate) => candidate.socketId !== socketId);
+      if (opponent) outbound.push(direct(opponent.socketId, "game:aim-clear"));
+      return outbound;
+    }
     case "game:shoot": {
       const room = getRoom(state, socketId);
       if (!room || room.shotInProgress || room.finished) return outbound;
@@ -622,6 +666,8 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
         sequence: room.sequence,
         serverTime: Date.now(),
       };
+      const opponent = room.players.find((candidate) => candidate.socketId !== socketId);
+      if (opponent) outbound.push(direct(opponent.socketId, "game:aim-clear"));
       outbound.push(toMatch(room, "game:shot", room.lastShot));
       return outbound;
     }

@@ -68,6 +68,15 @@ assert.equal(firstMatch.payload.myTeam, "mint");
 assert.equal(secondMatch.payload.myTeam, "coral");
 assert.equal(firstMatch.payload.matchId, secondMatch.payload.matchId);
 
+first.receive("game:aim", { bodyId: "mint-0", dirX: 0.6, dirY: -0.8, pull: 32 });
+await settle();
+assert.equal(second.latest("game:aim")?.payload?.bodyId, "mint-0");
+assert.equal(second.latest("game:aim")?.payload?.pull, 32);
+assert.equal(first.latest("game:aim"), undefined);
+first.receive("game:aim-clear");
+await settle();
+assert(second.latest("game:aim-clear"));
+
 first.receive("game:shoot", { bodyId: "mint-0", dirX: 0, dirY: -1, pull: 40 });
 await settle();
 assert.equal(first.latest("game:shot")?.payload?.sequence, 1);
