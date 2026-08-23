@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Socket } from "socket.io-client";
+import { RealtimeClient } from "@/lib/realtime-client";
 import styles from "./FlickFootball.module.css";
 
 const WIDTH = 420;
@@ -839,7 +839,7 @@ function normalizeRoomCode(value: string) {
 
 export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCode?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<RealtimeClient | null>(null);
   const soundRef = useRef<SoundEngine | null>(null);
   const kickoffTeamRef = useRef<Team>("mint");
   const [session, setSession] = useState(0);
@@ -880,16 +880,12 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   };
 
   const connectRealtime = async (
-    onConnect: (socket: Socket) => void,
+    onConnect: (socket: RealtimeClient) => void,
     errorStage: Extract<OnlineStage, "menu" | "join-room">,
   ) => {
     closeSocket();
     try {
-      const { io } = await import("socket.io-client");
-      const realtimeUrl = process.env.NODE_ENV === "development"
-        ? `${window.location.protocol}//${window.location.hostname}:3001`
-        : undefined;
-      const socket = io(realtimeUrl, { transports: ["websocket"], autoConnect: false });
+      const socket = new RealtimeClient();
       socketRef.current = socket;
 
       socket.on("connect", () => onConnect(socket));
@@ -897,6 +893,16 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setRoomPending(false);
         setNetworkMessage("Could not reach the game server. Try again.");
         setOnlineStage(errorStage);
+      });
+      socket.on("disconnect", () => {
+        setRoomPending(false);
+        setNetworkMessage("The realtime connection ended. Start a new match.");
+        setOnlineStage("disconnected");
+      });
+      socket.on("server:error", ({ message }: { message: string }) => {
+        setRoomPending(false);
+        setNetworkMessage(message);
+        setOnlineStage("disconnected");
       });
       socket.on("room:created", ({ code }: { code: string }) => {
         setRoomCode(code);
