@@ -21,7 +21,7 @@ export default async function Home({ searchParams }: HomeProps) {
         </p>
         <div className={styles.featureList} aria-label="Game features">
           <span>6 × 6</span>
-          <span>3-pass chains</span>
+          <span>Unlimited pass chains</span>
           <span>First to 3</span>
         </div>
       </section>

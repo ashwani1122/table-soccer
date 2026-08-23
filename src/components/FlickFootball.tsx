@@ -13,6 +13,8 @@ const MAX_PULL = 92;
 const MAX_SPEED = 920;
 const TURN_TIME = 20;
 const PASS_GAP = 7;
+const PASS_ALIGN_DELAY = 1;
+const RESULT_HOME_DELAY = 3_000;
 
 type Team = "mint" | "coral";
 type Phase = "ready" | "moving" | "goal" | "finished";
@@ -44,7 +46,7 @@ type Game = {
   activeTeam: Team;
   phase: Phase;
   score: Record<Team, number>;
-  passesLeft: number;
+  passChain: number;
   turnTime: number;
   turnTick: number;
   drag: Drag | null;
@@ -52,6 +54,7 @@ type Game = {
   carrierId: string | null;
   carrierOffset: { x: number; y: number } | null;
   carrierTargetOffset: { x: number; y: number } | null;
+  carrierAlignDelay: number;
   caughtThisMove: boolean;
   goalResetAt: number | null;
   message: string;
@@ -62,7 +65,7 @@ type Hud = {
   activeTeam: Team;
   phase: Phase;
   score: Record<Team, number>;
-  passesLeft: number;
+  passChain: number;
   turnTime: number;
   message: string;
   winner: Team | null;
@@ -343,7 +346,7 @@ function makeGame(): Game {
     activeTeam: "mint",
     phase: "ready",
     score: { mint: 0, coral: 0 },
-    passesLeft: 3,
+    passChain: 0,
     turnTime: TURN_TIME,
     turnTick: 0,
     drag: null,
@@ -351,6 +354,7 @@ function makeGame(): Game {
     carrierId: null,
     carrierOffset: null,
     carrierTargetOffset: null,
+    carrierAlignDelay: 0,
     caughtThisMove: false,
     goalResetAt: null,
     message: "YOUR TURN",
@@ -363,7 +367,7 @@ function toHud(game: Game): Hud {
     activeTeam: game.activeTeam,
     phase: game.phase,
     score: { ...game.score },
-    passesLeft: game.passesLeft,
+    passChain: game.passChain,
     turnTime: Math.max(0, Math.ceil(game.turnTime)),
     message: game.message,
     winner: game.winner,
@@ -763,7 +767,7 @@ function resetPositions(game: Game, kickoffTeam: Team) {
   game.bodies = makeBodies();
   game.activeTeam = kickoffTeam;
   game.phase = "ready";
-  game.passesLeft = 3;
+  game.passChain = 0;
   game.turnTime = TURN_TIME;
   game.turnTick = 0;
   game.drag = null;
@@ -771,6 +775,7 @@ function resetPositions(game: Game, kickoffTeam: Team) {
   game.carrierId = null;
   game.carrierOffset = null;
   game.carrierTargetOffset = null;
+  game.carrierAlignDelay = 0;
   game.caughtThisMove = false;
   game.goalResetAt = null;
   game.message = kickoffTeam === "mint" ? "NEON FC KICKOFF" : "EMBER KICKOFF";
@@ -779,7 +784,7 @@ function resetPositions(game: Game, kickoffTeam: Team) {
 function switchTurn(game: Game, reason = "TURN CHANGED") {
   game.activeTeam = game.activeTeam === "mint" ? "coral" : "mint";
   game.phase = "ready";
-  game.passesLeft = 3;
+  game.passChain = 0;
   game.turnTime = TURN_TIME;
   game.turnTick = 0;
   game.drag = null;
@@ -787,6 +792,7 @@ function switchTurn(game: Game, reason = "TURN CHANGED") {
   game.carrierId = null;
   game.carrierOffset = null;
   game.carrierTargetOffset = null;
+  game.carrierAlignDelay = 0;
   game.caughtThisMove = false;
   game.message = reason;
   for (const body of game.bodies) {
@@ -812,7 +818,7 @@ function applySnapshot(game: Game, snapshot: GameSnapshot) {
   game.activeTeam = snapshot.activeTeam;
   game.phase = snapshot.phase;
   game.score = { ...snapshot.score };
-  game.passesLeft = snapshot.passesLeft;
+  game.passChain = snapshot.passChain;
   game.turnTime = snapshot.turnTime;
   game.turnTick = snapshot.turnTick;
   game.drag = null;
@@ -820,6 +826,7 @@ function applySnapshot(game: Game, snapshot: GameSnapshot) {
   game.carrierId = snapshot.carrierId;
   game.carrierOffset = snapshot.carrierOffset ? { ...snapshot.carrierOffset } : null;
   game.carrierTargetOffset = snapshot.carrierTargetOffset ? { ...snapshot.carrierTargetOffset } : null;
+  game.carrierAlignDelay = snapshot.carrierAlignDelay;
   game.caughtThisMove = snapshot.caughtThisMove;
   game.goalResetAt = snapshot.phase === "goal" ? performance.now() + 1350 : null;
   game.message = snapshot.message;
@@ -1108,8 +1115,23 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       const body = game.bodies.find((item) => item.id === shot.bodyId);
       if (!body || body.kind !== "player" || body.team !== game.activeTeam) return;
       const launchSpeed = (shot.pull / MAX_PULL) * MAX_SPEED;
-      body.vx = shot.dirX * launchSpeed;
-      body.vy = shot.dirY * launchSpeed;
+      const ball = game.bodies.find((item) => item.kind === "ball");
+      const isPossessionKick = game.carrierId === body.id && ball;
+
+      if (isPossessionKick) {
+        ball.vx = shot.dirX * launchSpeed;
+        ball.vy = shot.dirY * launchSpeed;
+        body.vx = 0;
+        body.vy = 0;
+        game.carrierId = null;
+        game.carrierOffset = null;
+        game.carrierTargetOffset = null;
+        game.carrierAlignDelay = 0;
+        sounds?.impact("ball", shot.pull / MAX_PULL);
+      } else {
+        body.vx = shot.dirX * launchSpeed;
+        body.vy = shot.dirY * launchSpeed;
+      }
       game.lastShooterId = body.id;
 
       shotPending = false;
@@ -1332,24 +1354,30 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           const isReceiver =
             playerBody.team === game.activeTeam &&
             playerBody.id !== game.lastShooterId &&
-            !game.carrierId &&
-            speed(ballBody) > 45 &&
-            game.passesLeft > 0;
+            !game.carrierId;
 
           if (isReceiver) {
             const dx = ballBody.x - playerBody.x;
             const dy = ballBody.y - playerBody.y;
             const length = Math.max(1, Math.hypot(dx, dy));
+            const contactDirection = { x: dx / length, y: dy / length };
+            const passDistance = playerBody.radius + ballBody.radius + PASS_GAP;
+            ballBody.x = playerBody.x + contactDirection.x * passDistance;
+            ballBody.y = playerBody.y + contactDirection.y * passDistance;
+            ballBody.vx = 0;
+            ballBody.vy = 0;
+            playerBody.vx = 0;
+            playerBody.vy = 0;
             game.carrierId = playerBody.id;
-            game.carrierOffset = { x: dx / length, y: dy / length };
+            game.carrierOffset = contactDirection;
             game.carrierTargetOffset = {
               x: 0,
               y: playerBody.team === "mint" ? -1 : 1,
             };
-            resolveCollision(playerBody, ballBody, 0.35);
+            game.carrierAlignDelay = PASS_ALIGN_DELAY;
             game.caughtThisMove = true;
-            game.passesLeft -= 1;
-            game.message = "PASS CAUGHT - ALIGNING TO GOAL";
+            game.passChain += 1;
+            game.message = "PASS RECEIVED - SETTING UP";
             sounds?.pass();
             syncHud();
           } else if (game.carrierId !== playerBody.id) {
@@ -1358,6 +1386,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               game.carrierId = null;
               game.carrierOffset = null;
               game.carrierTargetOffset = null;
+              game.carrierAlignDelay = 0;
               game.caughtThisMove = false;
               game.message = teammateKick ? "TEAMMATE KICK" : "POSSESSION BROKEN";
             }
@@ -1383,11 +1412,14 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       if (game.carrierId && game.carrierOffset && game.carrierTargetOffset) {
         const carrier = game.bodies.find((body) => body.id === game.carrierId);
         if (carrier) {
-          game.carrierOffset = rotateToward(
-            game.carrierOffset,
-            game.carrierTargetOffset,
-            6 * dt,
-          );
+          game.carrierAlignDelay = Math.max(0, game.carrierAlignDelay - dt);
+          if (game.carrierAlignDelay === 0) {
+            game.carrierOffset = rotateToward(
+              game.carrierOffset,
+              game.carrierTargetOffset,
+              6 * dt,
+            );
+          }
           const gap = carrier.radius + ball.radius + PASS_GAP;
           carrier.x = ball.x - game.carrierOffset.x * gap;
           carrier.y = ball.y - game.carrierOffset.y * gap;
@@ -1395,6 +1427,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           carrier.vy = 0;
           constrainPlayerToPitch(carrier);
           if (
+            game.carrierAlignDelay === 0 &&
             Math.hypot(
               game.carrierOffset.x - game.carrierTargetOffset.x,
               game.carrierOffset.y - game.carrierTargetOffset.y,
@@ -1425,10 +1458,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       const carrierIsAligning = Boolean(
         game.carrierOffset &&
         game.carrierTargetOffset &&
-        Math.hypot(
-          game.carrierOffset.x - game.carrierTargetOffset.x,
-          game.carrierOffset.y - game.carrierTargetOffset.y,
-        ) > 0.015,
+        (game.carrierAlignDelay > 0 ||
+          Math.hypot(
+            game.carrierOffset.x - game.carrierTargetOffset.x,
+            game.carrierOffset.y - game.carrierTargetOffset.y,
+          ) > 0.015),
       );
       const hasMotion = carrierIsAligning || game.bodies.some((body) => speed(body) > 7);
       if (!hasMotion) {
@@ -1443,10 +1477,9 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           game.turnTick = 0;
           game.lastShooterId = null;
           game.caughtThisMove = false;
-          game.carrierId = null;
-          game.carrierOffset = null;
           game.carrierTargetOffset = null;
-          game.message = game.passesLeft > 0 ? "PASS COMPLETE — GO AGAIN" : "FINAL TOUCH";
+          game.carrierAlignDelay = 0;
+          game.message = `PASS ${game.passChain} COMPLETE — SHOOT THE BALL`;
           syncHud();
         } else {
           switchTurn(game);
@@ -1497,6 +1530,29 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       socket?.off("game:error", onGameError);
     };
   }, [match, onlineStage, session]);
+
+  useEffect(() => {
+    if (hud.phase !== "finished" || (onlineStage !== "matched" && onlineStage !== "practice")) return;
+    const timer = window.setTimeout(() => {
+      if (onlineStage === "matched") socketRef.current?.emit("match:leave");
+      socketRef.current?.removeAllListeners();
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+      kickoffTeamRef.current = "mint";
+      setMatch(null);
+      setRoomCode("");
+      setRoomPending(false);
+      setNetworkMessage("");
+      setRematchReady(0);
+      setOnlineStage("menu");
+      setSession((value) => value + 1);
+
+      const homeUrl = new URL(window.location.href);
+      homeUrl.searchParams.delete("room");
+      window.history.replaceState({}, "", `${homeUrl.pathname}${homeUrl.search}${homeUrl.hash}`);
+    }, RESULT_HOME_DELAY);
+    return () => window.clearTimeout(timer);
+  }, [hud.phase, onlineStage]);
 
   const active = TEAM_META[hud.activeTeam];
   const nameForTeam = (team: Team) => {
@@ -1563,11 +1619,9 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           <span className={styles.liveDot} />
           {turnMessage}
         </div>
-        <div className={styles.passPips} aria-label={`${hud.passesLeft} passes remaining`}>
+        <div className={styles.passPips} aria-label={`${hud.passChain} completed passes in this turn`}>
           <span>PASS CHAIN</span>
-          {[0, 1, 2].map((index) => (
-            <i key={index} className={index < hud.passesLeft ? styles.passActive : undefined} />
-          ))}
+          <b>×{hud.passChain}</b>
         </div>
       </div>
 
@@ -1628,7 +1682,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
             <ol>
               <li><b>Pull back</b><span>Drag opposite the direction you want the disc to travel.</span></li>
               <li><b>Read the power</b><span>A longer pull creates more force and a faster collision.</span></li>
-              <li><b>Catch the pass</b><span>Hit a teammate to stick the ball and keep your turn, up to three times.</span></li>
+              <li><b>Receive a pass</b><span>The ball stops with a small gap at any teammate it reaches, even from a hard hit.</span></li>
+              <li><b>Shoot the ball</b><span>A receiving player stays still on the next flick; only the ball follows your arrow.</span></li>
               <li><b>Break possession</b><span>An opponent collision bounces normally and ends the passing chain.</span></li>
             </ol>
             <button className={styles.playButton} type="button" onClick={() => setShowRules(false)}>LET’S PLAY</button>

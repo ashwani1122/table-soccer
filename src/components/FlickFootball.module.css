@@ -185,16 +185,14 @@
   font-size: 0.45rem;
 }
 
-.passPips i {
-  width: 12px;
-  height: 4px;
-  border-radius: 20px;
-  background: #26364a;
-}
-
-.passPips i.passActive {
-  background: #ffd75a;
-  box-shadow: 0 0 7px rgba(255, 215, 90, 0.38);
+.passPips b {
+  min-width: 25px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(255, 215, 90, 0.11);
+  color: #ffd75a;
+  font-size: 0.55rem;
+  text-align: center;
 }
 
 .pitchFrame {
