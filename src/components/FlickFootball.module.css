@@ -268,6 +268,17 @@
   font-size: 0.78rem;
 }
 
+.emotes button.sfxButton {
+  color: #65e3b1;
+  font-size: 0.42rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
+.emotes button.sfxButton[aria-pressed="false"] {
+  color: #718399;
+}
+
 .activeBadge {
   display: flex;
   align-items: center;
@@ -568,6 +579,11 @@
   box-shadow: 0 0 0 3px rgba(72, 224, 170, 0.09);
 }
 
+.homeActions {
+  display: grid;
+  gap: 8px;
+}
+
 .onlineButton,
 .practiceButton {
   width: 100%;
@@ -597,6 +613,62 @@
   font-size: 0.5rem;
 }
 
+.onlineButton:disabled,
+.roomButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.roomButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #dce9f4;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.roomButton:hover {
+  border-color: rgba(103, 227, 178, 0.32);
+  background: rgba(103, 227, 178, 0.075);
+}
+
+.roomButton > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.roomButton b {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(103, 227, 178, 0.11);
+  color: #67e3b2;
+  font-size: 0.9rem;
+}
+
+.roomButton i {
+  font-size: 0.61rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.075em;
+}
+
+.roomButton small {
+  color: #71859b;
+  font-size: 0.46rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
 .practiceButton {
   margin-top: 7px;
   padding: 11px;
@@ -609,6 +681,147 @@
   margin: -2px 0 10px;
   color: #ff8b91;
   font-size: 0.62rem;
+}
+
+.roomCard {
+  padding-top: 34px;
+}
+
+.backButton {
+  position: absolute;
+  top: 15px;
+  left: 16px;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  color: #71859a;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.5rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+}
+
+.roomMark {
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  margin: 10px auto 16px;
+  border: 1px solid rgba(103, 227, 178, 0.3);
+  border-radius: 19px;
+  background: linear-gradient(145deg, rgba(103, 227, 178, 0.14), rgba(103, 227, 178, 0.035));
+  color: #67e3b2;
+  box-shadow: 0 13px 30px rgba(0, 0, 0, 0.25);
+  font-size: 1.55rem;
+  font-weight: 950;
+}
+
+.codeField {
+  display: grid;
+  gap: 7px;
+  margin: 4px 0 13px;
+  text-align: left;
+}
+
+.codeField > span {
+  color: #72869d;
+  font-size: 0.5rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.codeField input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(103, 227, 178, 0.28);
+  border-radius: 12px;
+  outline: 0;
+  background: rgba(103, 227, 178, 0.055);
+  color: #f7fbff;
+  font-family: inherit;
+  font-size: 1.08rem;
+  font-weight: 950;
+  letter-spacing: 0.24em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.codeField input::placeholder {
+  color: #43566a;
+}
+
+.codeField input:focus {
+  border-color: #67e3b2;
+  box-shadow: 0 0 0 3px rgba(103, 227, 178, 0.09);
+}
+
+.roomCodeDisplay {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 4px 0 18px;
+}
+
+.roomCodeDisplay span {
+  aspect-ratio: 0.86;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(103, 227, 178, 0.23);
+  border-radius: 10px;
+  background: rgba(103, 227, 178, 0.075);
+  color: #effff9;
+  box-shadow: inset 0 -7px 15px rgba(0, 0, 0, 0.12);
+  font-size: clamp(0.83rem, 4vw, 1.12rem);
+  font-weight: 950;
+}
+
+.waitingPlayers {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 8px auto 23px;
+}
+
+.waitingPlayers span {
+  width: 61px;
+  height: 61px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #67e3b2;
+  border-radius: 50%;
+  background: #10253a;
+  color: #eafff7;
+  box-shadow: 0 0 0 6px rgba(103, 227, 178, 0.07);
+  font-size: 0.54rem;
+  font-weight: 950;
+}
+
+.waitingPlayers span:last-child {
+  border-style: dashed;
+  border-color: #53677c;
+  color: #72869a;
+  box-shadow: none;
+  font-size: 1rem;
+  animation: softPulse 1.4s ease-in-out infinite;
+}
+
+.waitingPlayers i {
+  color: #53677c;
+  font-size: 1rem;
+  font-style: normal;
+  letter-spacing: 0.12em;
+}
+
+.miniLoader {
+  width: 70px;
+  height: 70px;
+  margin: 8px auto 24px;
+  border: 2px solid rgba(103, 227, 178, 0.14);
+  border-top-color: #67e3b2;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
 }
 
 .searchCard {
@@ -703,6 +916,10 @@
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes softPulse {
+  50% { opacity: 0.52; transform: scale(0.95); }
 }
 
 @media (max-width: 500px) {

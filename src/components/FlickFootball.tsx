@@ -12,6 +12,7 @@ const GOAL_RIGHT = 263;
 const MAX_PULL = 92;
 const MAX_SPEED = 920;
 const TURN_TIME = 20;
+const PASS_GAP = 7;
 
 type Team = "mint" | "coral";
 type Phase = "ready" | "moving" | "goal" | "finished";
@@ -67,7 +68,14 @@ type Hud = {
   winner: Team | null;
 };
 
-type OnlineStage = "menu" | "searching" | "matched" | "practice" | "disconnected";
+type OnlineStage =
+  | "menu"
+  | "searching"
+  | "join-room"
+  | "waiting-room"
+  | "matched"
+  | "practice"
+  | "disconnected";
 
 type MatchInfo = {
   matchId: string;
@@ -75,6 +83,7 @@ type MatchInfo = {
   player: { name: string; team: Team };
   opponent: { name: string; team: Team };
   startsAt: number;
+  roomCode?: string | null;
 };
 
 type Shot = {
@@ -89,10 +98,222 @@ type GameSnapshot = Omit<Game, "drag" | "goalResetAt"> & {
   goalResetAt: number | null;
 };
 
+type SoundEngine = {
+  unlock: () => void;
+  setEnabled: (enabled: boolean) => void;
+  flick: (power: number) => void;
+  impact: (kind: "disc" | "ball", strength: number) => void;
+  wall: (strength: number) => void;
+  pass: () => void;
+  goal: () => void;
+  win: () => void;
+  turn: () => void;
+  dispose: () => void;
+};
+
+type ConfettiPiece = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  rotation: number;
+  spin: number;
+  life: number;
+  color: string;
+};
+
 const TEAM_META = {
   mint: { name: "NEON FC", short: "N", primary: "#48e0aa", dark: "#096f67" },
   coral: { name: "EMBER", short: "E", primary: "#ff6d73", dark: "#9f2446" },
 } as const;
+
+function createSoundEngine(): SoundEngine {
+  let context: AudioContext | null = null;
+  let enabled = true;
+  let lastImpactAt = 0;
+  let lastWallAt = 0;
+  let ballHitBuffer: AudioBuffer | null = null;
+  let applauseBuffer: AudioBuffer | null = null;
+  let samplesLoading = false;
+
+  const getContext = () => {
+    if (!enabled) return null;
+    context ??= new AudioContext();
+    if (context.state === "suspended") void context.resume();
+    return context;
+  };
+
+  const loadSamples = () => {
+    const audio = getContext();
+    if (!audio || samplesLoading) return;
+    samplesLoading = true;
+    const decode = async (url: string) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Could not load ${url}`);
+      return audio.decodeAudioData(await response.arrayBuffer());
+    };
+    void Promise.all([
+      decode("/sounds/player-ball-hit.wav"),
+      decode("/sounds/match-win-applause.wav"),
+    ]).then(([ballHit, applause]) => {
+      ballHitBuffer = ballHit;
+      applauseBuffer = applause;
+    }).catch(() => {
+      samplesLoading = false;
+    });
+  };
+
+  const playBuffer = (
+    buffer: AudioBuffer,
+    volume: number,
+    playbackRate = 1,
+    maximumDuration?: number,
+  ) => {
+    const audio = getContext();
+    if (!audio) return;
+    const source = audio.createBufferSource();
+    const gain = audio.createGain();
+    source.buffer = buffer;
+    source.playbackRate.value = playbackRate;
+    gain.gain.value = volume;
+    source.connect(gain);
+    gain.connect(audio.destination);
+    source.start();
+    if (maximumDuration) source.stop(audio.currentTime + Math.min(maximumDuration, buffer.duration));
+  };
+
+  const tone = (
+    startFrequency: number,
+    endFrequency: number,
+    duration: number,
+    volume: number,
+    type: OscillatorType = "sine",
+    delay = 0,
+  ) => {
+    const audio = getContext();
+    if (!audio) return;
+    const start = audio.currentTime + delay;
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(startFrequency, start);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, endFrequency), start + duration);
+    gain.gain.setValueAtTime(Math.max(0.0001, volume), start);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(audio.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.01);
+  };
+
+  return {
+    unlock: () => {
+      getContext();
+      loadSamples();
+    },
+    setEnabled: (nextEnabled) => {
+      enabled = nextEnabled;
+      if (!enabled && context?.state === "running") void context.suspend();
+      if (enabled && context?.state === "suspended") void context.resume();
+    },
+    flick: (power) => {
+      tone(250 + power * 120, 95, 0.075 + power * 0.035, 0.025 + power * 0.035, "sawtooth");
+    },
+    impact: (kind, strength) => {
+      const now = performance.now();
+      if (now - lastImpactAt < 38) return;
+      lastImpactAt = now;
+      const force = clamp(strength, 0.15, 1);
+      if (kind === "ball") {
+        loadSamples();
+        if (ballHitBuffer) {
+          playBuffer(ballHitBuffer, 0.18 + force * 0.42, 0.94 + force * 0.1, 0.55);
+        }
+        else tone(720, 430, 0.035, 0.018 + force * 0.035, "triangle");
+      } else {
+        tone(240, 145, 0.045, 0.015 + force * 0.032, "square");
+      }
+    },
+    wall: (strength) => {
+      const now = performance.now();
+      if (now - lastWallAt < 55) return;
+      lastWallAt = now;
+      tone(165, 105, 0.05, 0.015 + clamp(strength, 0, 1) * 0.025, "square");
+    },
+    pass: () => {
+      tone(540, 880, 0.09, 0.035, "sine");
+      tone(820, 1040, 0.07, 0.018, "sine", 0.055);
+    },
+    goal: () => {
+      [0, 0.075, 0.15, 0.24].forEach((delay, index) => {
+        const frequencies = [420, 560, 700, 940];
+        tone(frequencies[index] ?? 700, (frequencies[index] ?? 700) * 1.08, 0.16, 0.045, "triangle", delay);
+      });
+    },
+    win: () => {
+      loadSamples();
+      if (applauseBuffer) playBuffer(applauseBuffer, 0.72, 1, 5);
+      else tone(520, 880, 0.4, 0.04, "triangle");
+    },
+    turn: () => {
+      tone(310, 390, 0.065, 0.022, "sine");
+    },
+    dispose: () => {
+      if (context) void context.close();
+      context = null;
+      ballHitBuffer = null;
+      applauseBuffer = null;
+    },
+  };
+}
+
+const CONFETTI_COLORS = ["#48e0aa", "#ff6d73", "#ffd75a", "#65a9ff", "#ffffff", "#bc75ff"];
+
+function addConfetti(pieces: ConfettiPiece[], amount: number) {
+  for (let index = 0; index < amount; index += 1) {
+    pieces.push({
+      x: Math.random() * WIDTH,
+      y: -10 - Math.random() * 150,
+      vx: (Math.random() - 0.5) * 150,
+      vy: 105 + Math.random() * 230,
+      size: 4 + Math.random() * 7,
+      rotation: Math.random() * Math.PI,
+      spin: (Math.random() - 0.5) * 9,
+      life: 2.5 + Math.random() * 2.1,
+      color: CONFETTI_COLORS[index % CONFETTI_COLORS.length] ?? "#ffffff",
+    });
+  }
+  if (pieces.length > 420) pieces.splice(0, pieces.length - 420);
+}
+
+function updateAndDrawConfetti(
+  ctx: CanvasRenderingContext2D,
+  pieces: ConfettiPiece[],
+  dt: number,
+) {
+  for (let index = pieces.length - 1; index >= 0; index -= 1) {
+    const piece = pieces[index];
+    if (!piece) continue;
+    piece.life -= dt;
+    piece.vy += 270 * dt;
+    piece.vx *= Math.exp(-0.35 * dt);
+    piece.x += piece.vx * dt;
+    piece.y += piece.vy * dt;
+    piece.rotation += piece.spin * dt;
+    if (piece.life <= 0 || piece.y > HEIGHT + 30) {
+      pieces.splice(index, 1);
+      continue;
+    }
+    ctx.save();
+    ctx.translate(piece.x, piece.y);
+    ctx.rotate(piece.rotation);
+    ctx.globalAlpha = Math.min(1, piece.life * 1.8);
+    ctx.fillStyle = piece.color;
+    ctx.fillRect(-piece.size / 2, -piece.size / 4, piece.size, piece.size / 2);
+    ctx.restore();
+  }
+}
 
 function player(id: string, team: Team, number: number, x: number, y: number): Body {
   return { id, kind: "player", team, number, x, y, vx: 0, vy: 0, radius: 19, mass: 2.6 };
@@ -112,7 +333,7 @@ function makeBodies(): Body[] {
     player("mint-4", "mint", 4, 310, 562),
     player("mint-5", "mint", 5, 158, 470),
     player("mint-6", "mint", 6, 262, 470),
-    { id: "ball", kind: "ball", x: 210, y: 360, vx: 0, vy: 0, radius: 10, mass: 0.7 },
+    { id: "ball", kind: "ball", x: 210, y: 360, vx: 0, vy: 0, radius: 11, mass: 0.7 },
   ];
 }
 
@@ -206,37 +427,6 @@ function constrainFreeBallToPitch(ball: Body) {
     ball.y = FIELD.bottom - ball.radius;
     if (ball.vy > 0) ball.vy = -Math.abs(ball.vy) * 0.88;
   }
-}
-
-function constrainCarrierPair(carrier: Body, ball: Body) {
-  const leftEdge = Math.min(carrier.x - carrier.radius, ball.x - ball.radius);
-  const rightEdge = Math.max(carrier.x + carrier.radius, ball.x + ball.radius);
-  let shiftX = 0;
-  if (leftEdge < FIELD.left) shiftX = FIELD.left - leftEdge;
-  else if (rightEdge > FIELD.right) shiftX = FIELD.right - rightEdge;
-
-  const insideGoalMouth = ball.x + shiftX > GOAL_LEFT && ball.x + shiftX < GOAL_RIGHT;
-  const topEdge = insideGoalMouth
-    ? carrier.y - carrier.radius
-    : Math.min(carrier.y - carrier.radius, ball.y - ball.radius);
-  const bottomEdge = insideGoalMouth
-    ? carrier.y + carrier.radius
-    : Math.max(carrier.y + carrier.radius, ball.y + ball.radius);
-  let shiftY = 0;
-  if (topEdge < FIELD.top) shiftY = FIELD.top - topEdge;
-  else if (bottomEdge > FIELD.bottom) shiftY = FIELD.bottom - bottomEdge;
-
-  carrier.x += shiftX;
-  carrier.y += shiftY;
-  ball.x += shiftX;
-  ball.y += shiftY;
-
-  if (shiftX > 0 && ball.vx < 0) ball.vx = Math.abs(ball.vx) * 0.84;
-  else if (shiftX < 0 && ball.vx > 0) ball.vx = -Math.abs(ball.vx) * 0.84;
-  if (shiftY > 0 && ball.vy < 0) ball.vy = Math.abs(ball.vy) * 0.84;
-  else if (shiftY < 0 && ball.vy > 0) ball.vy = -Math.abs(ball.vy) * 0.84;
-  carrier.vx = ball.vx;
-  carrier.vy = ball.vy;
 }
 
 function resolveCollision(a: Body, b: Body, restitution = 0.88) {
@@ -401,9 +591,10 @@ function drawPlayer(
   ctx: CanvasRenderingContext2D,
   body: Body,
   activeTeam: Team,
-  selected: boolean,
+  hideActiveRing: boolean,
   carrier: boolean,
   keepUpright: boolean,
+  animationTime: number,
 ) {
   const meta = TEAM_META[body.team as Team];
   ctx.save();
@@ -419,18 +610,25 @@ function drawPlayer(
   ctx.fill();
   ctx.shadowColor = "transparent";
 
-  if (body.team === activeTeam) {
-    ctx.strokeStyle = selected ? "#ffffff" : `${meta.primary}aa`;
-    ctx.lineWidth = selected ? 4 : 2.5;
+  if (body.team === activeTeam && !hideActiveRing) {
+    ctx.save();
+    ctx.strokeStyle = meta.primary;
+    ctx.shadowColor = meta.primary;
+    ctx.shadowBlur = 7;
+    ctx.lineWidth = 2.3;
+    ctx.setLineDash([8, 7]);
+    ctx.lineDashOffset = -(animationTime * 0.045);
     ctx.beginPath();
-    ctx.arc(0, 0, body.radius + (selected ? 8 : 5), 0, Math.PI * 2);
+    ctx.arc(0, 0, body.radius + 7, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
   }
 
   if (carrier) {
     ctx.strokeStyle = "#ffd75a";
     ctx.lineWidth = 2;
     ctx.setLineDash([3, 3]);
+    ctx.lineDashOffset = animationTime * 0.035;
     ctx.beginPath();
     ctx.arc(0, 0, body.radius + 11, 0, Math.PI * 2);
     ctx.stroke();
@@ -505,7 +703,7 @@ function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body) {
   ctx.restore();
 }
 
-function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team) {
+function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team, animationTime: number) {
   const flipped = viewTeam === "coral";
   ctx.save();
   if (flipped) {
@@ -520,9 +718,10 @@ function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team) {
         ctx,
         body,
         game.activeTeam,
-        game.drag?.bodyId === body.id,
+        game.drag !== null,
         game.carrierId === body.id,
         flipped,
+        animationTime,
       );
     }
   }
@@ -542,11 +741,18 @@ function drawGame(ctx: CanvasRenderingContext2D, game: Game, viewTeam: Team) {
     ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.stroke();
-    ctx.fillStyle = game.phase === "finished" ? "#67e3b2" : "#ffdc66";
+    const localPlayerWon = game.winner === viewTeam;
+    ctx.fillStyle = game.phase === "finished"
+      ? localPlayerWon ? "#67e3b2" : "#ff7d84"
+      : "#ffdc66";
     ctx.font = "900 34px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(game.phase === "finished" ? "MATCH WON" : "GOAL!", 210, 345);
+    ctx.fillText(
+      game.phase === "finished" ? localPlayerWon ? "YOU WON" : "YOU LOST" : "GOAL!",
+      210,
+      345,
+    );
     ctx.fillStyle = "rgba(255,255,255,0.7)";
     ctx.font = "700 12px Arial";
     ctx.fillText(game.message, 210, 382);
@@ -620,19 +826,29 @@ function applySnapshot(game: Game, snapshot: GameSnapshot) {
   game.winner = snapshot.winner;
 }
 
-export default function FlickFootball() {
+function normalizeRoomCode(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+}
+
+export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCode?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const socketRef = useRef<Socket | null>(null);
+  const soundRef = useRef<SoundEngine | null>(null);
   const kickoffTeamRef = useRef<Team>("mint");
   const [session, setSession] = useState(0);
   const [showRules, setShowRules] = useState(false);
   const [hud, setHud] = useState<Hud>(() => toHud(makeGame()));
-  const [onlineStage, setOnlineStage] = useState<OnlineStage>("menu");
+  const initialCode = normalizeRoomCode(initialRoomCode);
+  const [onlineStage, setOnlineStage] = useState<OnlineStage>(initialCode ? "join-room" : "menu");
   const [match, setMatch] = useState<MatchInfo | null>(null);
   const [playerName, setPlayerName] = useState("Ashwani");
   const [searchSeconds, setSearchSeconds] = useState(0);
   const [rematchReady, setRematchReady] = useState(0);
   const [networkMessage, setNetworkMessage] = useState("");
+  const [soundOn, setSoundOn] = useState(true);
+  const [roomCode, setRoomCode] = useState(initialCode);
+  const [roomPending, setRoomPending] = useState(false);
+  const [roomCopied, setRoomCopied] = useState(false);
 
   useEffect(() => {
     if (onlineStage !== "searching") return;
@@ -641,8 +857,12 @@ export default function FlickFootball() {
   }, [onlineStage]);
 
   useEffect(() => {
+    const sound = createSoundEngine();
+    soundRef.current = sound;
     return () => {
       socketRef.current?.disconnect();
+      sound.dispose();
+      soundRef.current = null;
     };
   }, []);
 
@@ -652,50 +872,137 @@ export default function FlickFootball() {
     socketRef.current = null;
   };
 
-  const startMatchmaking = async () => {
+  const connectRealtime = async (
+    onConnect: (socket: Socket) => void,
+    errorStage: Extract<OnlineStage, "menu" | "join-room">,
+  ) => {
     closeSocket();
+    try {
+      const { io } = await import("socket.io-client");
+      const realtimeUrl = process.env.NODE_ENV === "development"
+        ? `${window.location.protocol}//${window.location.hostname}:3001`
+        : undefined;
+      const socket = io(realtimeUrl, { transports: ["websocket"], autoConnect: false });
+      socketRef.current = socket;
+
+      socket.on("connect", () => onConnect(socket));
+      socket.on("connect_error", () => {
+        setRoomPending(false);
+        setNetworkMessage("Could not reach the game server. Try again.");
+        setOnlineStage(errorStage);
+      });
+      socket.on("room:created", ({ code }: { code: string }) => {
+        setRoomCode(code);
+        setRoomPending(false);
+        setNetworkMessage("");
+        setOnlineStage("waiting-room");
+      });
+      socket.on("room:error", ({ action, message }: { action: string; message: string }) => {
+        setRoomPending(false);
+        setNetworkMessage(message);
+        setOnlineStage(action === "join" ? "join-room" : "menu");
+      });
+      socket.on("room:closed", () => {
+        setRoomPending(false);
+        setNetworkMessage("This private room was closed.");
+        setOnlineStage("disconnected");
+      });
+      socket.on("match:found", (data: MatchInfo) => {
+        kickoffTeamRef.current = "mint";
+        setMatch(data);
+        setRoomPending(false);
+        if (data.roomCode) setRoomCode(data.roomCode);
+        setNetworkMessage("");
+        setRematchReady(0);
+        setOnlineStage("matched");
+        setSession((value) => value + 1);
+      });
+      socket.on("match:opponent-left", () => {
+        setNetworkMessage("Your opponent left the match.");
+        setOnlineStage("disconnected");
+      });
+      socket.on("match:rematch-status", ({ ready }: { ready: number }) => {
+        setRematchReady(ready);
+      });
+      socket.on("match:reset", ({ activeTeam }: { activeTeam: Team }) => {
+        kickoffTeamRef.current = activeTeam;
+        setRematchReady(0);
+        setNetworkMessage("");
+        setSession((value) => value + 1);
+      });
+      socket.connect();
+    } catch {
+      setRoomPending(false);
+      setNetworkMessage("Could not start the realtime connection. Try again.");
+      setOnlineStage(errorStage);
+    }
+  };
+
+  const startMatchmaking = async () => {
+    soundRef.current?.unlock();
     setMatch(null);
+    setRoomCode("");
     setNetworkMessage("");
     setRematchReady(0);
     setSearchSeconds(0);
     setOnlineStage("searching");
+    await connectRealtime(
+      (socket) => socket.emit("match:find", { name: playerName.trim() || "Player" }),
+      "menu",
+    );
+  };
 
-    const { io } = await import("socket.io-client");
-    const realtimeUrl = process.env.NODE_ENV === "development"
-      ? `${window.location.protocol}//${window.location.hostname}:3001`
-      : undefined;
-    const socket = io(realtimeUrl, { transports: ["websocket"], autoConnect: false });
-    socketRef.current = socket;
+  const createPrivateRoom = async () => {
+    soundRef.current?.unlock();
+    setMatch(null);
+    setRoomCode("");
+    setRoomCopied(false);
+    setRoomPending(true);
+    setNetworkMessage("");
+    setOnlineStage("waiting-room");
+    await connectRealtime(
+      (socket) => socket.emit("room:create", { name: playerName.trim() || "Player" }),
+      "menu",
+    );
+  };
 
-    socket.on("connect", () => {
-      socket.emit("match:find", { name: playerName.trim() || "Player" });
-    });
-    socket.on("connect_error", () => {
-      setNetworkMessage("Could not reach the game server. Try again.");
-      setOnlineStage("menu");
-    });
-    socket.on("match:found", (data: MatchInfo) => {
-      kickoffTeamRef.current = "mint";
-      setMatch(data);
-      setNetworkMessage("");
-      setRematchReady(0);
-      setOnlineStage("matched");
-      setSession((value) => value + 1);
-    });
-    socket.on("match:opponent-left", () => {
-      setNetworkMessage("Your opponent left the match.");
-      setOnlineStage("disconnected");
-    });
-    socket.on("match:rematch-status", ({ ready }: { ready: number }) => {
-      setRematchReady(ready);
-    });
-    socket.on("match:reset", ({ activeTeam }: { activeTeam: Team }) => {
-      kickoffTeamRef.current = activeTeam;
-      setRematchReady(0);
-      setNetworkMessage("");
-      setSession((value) => value + 1);
-    });
-    socket.connect();
+  const joinPrivateRoom = async () => {
+    const code = normalizeRoomCode(roomCode);
+    if (code.length !== 6) {
+      setNetworkMessage("Enter the complete 6-character room code.");
+      return;
+    }
+    soundRef.current?.unlock();
+    setMatch(null);
+    setRoomCode(code);
+    setRoomPending(true);
+    setNetworkMessage("");
+    await connectRealtime(
+      (socket) => socket.emit("room:join", { code, name: playerName.trim() || "Player" }),
+      "join-room",
+    );
+  };
+
+  const sharePrivateRoom = async () => {
+    if (!roomCode) return;
+    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+    const shareData = {
+      title: "Join my FlickXI match",
+      text: `Join my FlickXI room with code ${roomCode}.`,
+      url,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareData.text} ${url}`);
+      }
+      setRoomCopied(true);
+      window.setTimeout(() => setRoomCopied(false), 1800);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setNetworkMessage("Could not share automatically. Copy the room code instead.");
+    }
   };
 
   const cancelSearch = () => {
@@ -704,10 +1011,22 @@ export default function FlickFootball() {
     setOnlineStage("menu");
   };
 
+  const cancelPrivateRoom = () => {
+    socketRef.current?.emit("room:cancel");
+    closeSocket();
+    setRoomCode("");
+    setRoomPending(false);
+    setNetworkMessage("");
+    setOnlineStage("menu");
+  };
+
   const startPractice = () => {
+    soundRef.current?.unlock();
     closeSocket();
     kickoffTeamRef.current = "mint";
     setMatch(null);
+    setRoomCode("");
+    setRoomPending(false);
     setNetworkMessage("");
     setOnlineStage("practice");
     setSession((value) => value + 1);
@@ -718,10 +1037,22 @@ export default function FlickFootball() {
     closeSocket();
     kickoffTeamRef.current = "mint";
     setMatch(null);
+    setRoomCode("");
+    setRoomPending(false);
     setNetworkMessage("");
     setRematchReady(0);
     setOnlineStage("menu");
     setSession((value) => value + 1);
+  };
+
+  const toggleSound = () => {
+    const nextValue = !soundOn;
+    setSoundOn(nextValue);
+    soundRef.current?.setEnabled(nextValue);
+    if (nextValue) {
+      soundRef.current?.unlock();
+      soundRef.current?.turn();
+    }
   };
 
   useEffect(() => {
@@ -729,6 +1060,7 @@ export default function FlickFootball() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const sounds = soundRef.current;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = WIDTH * dpr;
@@ -746,6 +1078,13 @@ export default function FlickFootball() {
     let lastHudKey = "";
     let shotPending = false;
     let lastSequence = -1;
+    const confetti: ConfettiPiece[] = [];
+
+    const celebrate = (matchWon: boolean) => {
+      addConfetti(confetti, matchWon ? 260 : 90);
+      sounds?.goal();
+      if (matchWon) sounds?.win();
+    };
 
     const syncHud = () => {
       const next = toHud(game);
@@ -773,23 +1112,11 @@ export default function FlickFootball() {
       body.vy = shot.dirY * launchSpeed;
       game.lastShooterId = body.id;
 
-      if (game.carrierId === body.id) {
-        const ball = game.bodies.find((item) => item.kind === "ball");
-        if (ball) {
-          ball.vx = body.vx * 1.06;
-          ball.vy = body.vy * 1.06;
-          ball.x = body.x + shot.dirX * (body.radius + ball.radius + 2);
-          ball.y = body.y + shot.dirY * (body.radius + ball.radius + 2);
-        }
-        game.carrierId = null;
-        game.carrierOffset = null;
-        game.carrierTargetOffset = null;
-      }
-
       shotPending = false;
       game.caughtThisMove = false;
       game.phase = "moving";
       game.message = "BALL IN MOTION";
+      sounds?.flick(shot.pull / MAX_PULL);
       syncHud();
     };
 
@@ -803,6 +1130,7 @@ export default function FlickFootball() {
     };
 
     const onPointerDown = (event: PointerEvent) => {
+      sounds?.unlock();
       if (game.phase !== "ready" || shotPending) return;
       if (onlineStage !== "practice" && onlineStage !== "matched") return;
       if (onlineStage === "matched" && match?.myTeam !== game.activeTeam) {
@@ -815,11 +1143,6 @@ export default function FlickFootball() {
         .filter((body) => body.kind === "player" && body.team === game.activeTeam)
         .find((body) => Math.hypot(point.x - body.x, point.y - body.y) <= body.radius + 12);
       if (!selectable) return;
-      if (game.carrierId && selectable.id !== game.carrierId) {
-        game.message = "PLAY THE BALL CARRIER";
-        syncHud();
-        return;
-      }
       canvas.setPointerCapture(event.pointerId);
       game.drag = {
         bodyId: selectable.id,
@@ -886,7 +1209,11 @@ export default function FlickFootball() {
       if (sequence < lastSequence) return;
       lastSequence = sequence;
       shotPending = false;
+      const previousPhase = game.phase;
       applySnapshot(game, snapshot);
+      if (previousPhase !== snapshot.phase && (snapshot.phase === "goal" || snapshot.phase === "finished")) {
+        celebrate(snapshot.phase === "finished");
+      }
       syncHud();
     };
     const onGameError = ({ message }: { message: string }) => {
@@ -916,6 +1243,7 @@ export default function FlickFootball() {
         body.vy = 0;
       }
       syncHud();
+      celebrate(game.phase === "finished");
       if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
     };
 
@@ -925,6 +1253,7 @@ export default function FlickFootball() {
         const kickoff = game.message.startsWith(TEAM_META.mint.name) ? "coral" : "mint";
         resetPositions(game, kickoff);
         syncHud();
+        sounds?.turn();
         if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
         return;
       }
@@ -933,7 +1262,7 @@ export default function FlickFootball() {
       const ball = game.bodies.find((body) => body.kind === "ball");
       if (!ball) return;
 
-      const damping = Math.exp(-2.3 * dt);
+      const damping = Math.exp(-2.0 * dt);
       for (const body of game.bodies) {
         body.x += body.vx * dt;
         body.y += body.vy * dt;
@@ -946,29 +1275,34 @@ export default function FlickFootball() {
       }
 
       for (const body of game.bodies) {
-        if (body.kind === "ball" && game.carrierId) continue;
         if (body.x - body.radius < FIELD.left) {
+          sounds?.wall(Math.abs(body.vx) / MAX_SPEED);
           body.x = FIELD.left + body.radius;
           body.vx = Math.abs(body.vx) * 0.86;
         } else if (body.x + body.radius > FIELD.right) {
+          sounds?.wall(Math.abs(body.vx) / MAX_SPEED);
           body.x = FIELD.right - body.radius;
           body.vx = -Math.abs(body.vx) * 0.86;
         }
 
         if (body.kind === "player") {
           if (body.y - body.radius < FIELD.top) {
+            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
             body.y = FIELD.top + body.radius;
             body.vy = Math.abs(body.vy) * 0.86;
           } else if (body.y + body.radius > FIELD.bottom) {
+            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
             body.y = FIELD.bottom - body.radius;
             body.vy = -Math.abs(body.vy) * 0.86;
           }
         } else {
           const insideGoal = body.x > GOAL_LEFT && body.x < GOAL_RIGHT;
           if (!insideGoal && body.y - body.radius < FIELD.top) {
+            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
             body.y = FIELD.top + body.radius;
             body.vy = Math.abs(body.vy) * 0.9;
           } else if (!insideGoal && body.y + body.radius > FIELD.bottom) {
+            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
             body.y = FIELD.bottom - body.radius;
             body.vy = -Math.abs(body.vy) * 0.9;
           }
@@ -981,7 +1315,10 @@ export default function FlickFootball() {
           const b = game.bodies[j];
           if (!a || !b) continue;
           if (a.kind === "player" && b.kind === "player") {
-            resolveCollision(a, b, 0.9);
+            const impactSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
+            if (resolveCollision(a, b, 0.9) && impactSpeed > 40) {
+              sounds?.impact("disc", impactSpeed / MAX_SPEED);
+            }
             continue;
           }
 
@@ -1009,27 +1346,36 @@ export default function FlickFootball() {
               x: 0,
               y: playerBody.team === "mint" ? -1 : 1,
             };
-            const combinedVx = (ballBody.vx * ballBody.mass + playerBody.vx * playerBody.mass) /
-              (ballBody.mass + playerBody.mass);
-            const combinedVy = (ballBody.vy * ballBody.mass + playerBody.vy * playerBody.mass) /
-              (ballBody.mass + playerBody.mass);
-            playerBody.vx = combinedVx;
-            playerBody.vy = combinedVy;
-            ballBody.vx = combinedVx;
-            ballBody.vy = combinedVy;
+            resolveCollision(playerBody, ballBody, 0.35);
             game.caughtThisMove = true;
             game.passesLeft -= 1;
             game.message = "PASS CAUGHT - ALIGNING TO GOAL";
+            sounds?.pass();
             syncHud();
           } else if (game.carrierId !== playerBody.id) {
-            if (game.carrierId && playerBody.team !== game.activeTeam) {
+            if (game.carrierId) {
+              const teammateKick = playerBody.team === game.activeTeam;
               game.carrierId = null;
               game.carrierOffset = null;
               game.carrierTargetOffset = null;
               game.caughtThisMove = false;
-              game.message = "POSSESSION BROKEN";
+              game.message = teammateKick ? "TEAMMATE KICK" : "POSSESSION BROKEN";
             }
-            resolveCollision(playerBody, ballBody, 0.94);
+            const impactSpeed = Math.hypot(
+              playerBody.vx - ballBody.vx,
+              playerBody.vy - ballBody.vy,
+            );
+            if (resolveCollision(playerBody, ballBody, 0.94) && impactSpeed > 35) {
+              sounds?.impact("ball", impactSpeed / MAX_SPEED);
+            }
+          } else {
+            const impactSpeed = Math.hypot(
+              playerBody.vx - ballBody.vx,
+              playerBody.vy - ballBody.vy,
+            );
+            if (resolveCollision(playerBody, ballBody, 0.94) && impactSpeed > 35) {
+              sounds?.impact("ball", impactSpeed / MAX_SPEED);
+            }
           }
         }
       }
@@ -1042,21 +1388,30 @@ export default function FlickFootball() {
             game.carrierTargetOffset,
             6 * dt,
           );
-          const gap = carrier.radius + ball.radius - 1;
+          const gap = carrier.radius + ball.radius + PASS_GAP;
           carrier.x = ball.x - game.carrierOffset.x * gap;
           carrier.y = ball.y - game.carrierOffset.y * gap;
-          carrier.vx = ball.vx;
-          carrier.vy = ball.vy;
-          constrainCarrierPair(carrier, ball);
+          carrier.vx = 0;
+          carrier.vy = 0;
+          constrainPlayerToPitch(carrier);
+          if (
+            Math.hypot(
+              game.carrierOffset.x - game.carrierTargetOffset.x,
+              game.carrierOffset.y - game.carrierTargetOffset.y,
+            ) <= 0.015
+          ) {
+            game.carrierOffset = { ...game.carrierTargetOffset };
+            game.carrierTargetOffset = null;
+          }
         }
       }
 
       for (const body of game.bodies) {
-        if (body.kind === "player" && body.id !== game.carrierId) {
+        if (body.kind === "player") {
           constrainPlayerToPitch(body);
         }
       }
-      if (!game.carrierId) constrainFreeBallToPitch(ball);
+      constrainFreeBallToPitch(ball);
 
       if (ball.y + ball.radius < FIELD.top && ball.x > GOAL_LEFT && ball.x < GOAL_RIGHT) {
         scoreGoal("mint", now);
@@ -1088,10 +1443,14 @@ export default function FlickFootball() {
           game.turnTick = 0;
           game.lastShooterId = null;
           game.caughtThisMove = false;
+          game.carrierId = null;
+          game.carrierOffset = null;
+          game.carrierTargetOffset = null;
           game.message = game.passesLeft > 0 ? "PASS COMPLETE — GO AGAIN" : "FINAL TOUCH";
           syncHud();
         } else {
           switchTurn(game);
+          sounds?.turn();
           syncHud();
         }
         if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
@@ -1112,13 +1471,15 @@ export default function FlickFootball() {
         if (game.turnTime <= 0) {
           const authorityTeam = game.activeTeam;
           switchTurn(game, "TIME'S UP");
+          sounds?.turn();
           syncHud();
           if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
         }
       }
 
       updatePhysics(dt, now);
-      drawGame(ctx, game, viewTeam);
+      drawGame(ctx, game, viewTeam, now);
+      updateAndDrawConfetti(ctx, confetti, dt);
       frameId = requestAnimationFrame(loop);
     };
 
@@ -1228,6 +1589,15 @@ export default function FlickFootball() {
           <button type="button" aria-label="Send fire reaction">🔥</button>
           <button type="button" aria-label="Send applause reaction">👏</button>
           <button type="button" aria-label="Send target reaction">🎯</button>
+          <button
+            className={styles.sfxButton}
+            type="button"
+            aria-label={soundOn ? "Mute sound effects" : "Enable sound effects"}
+            aria-pressed={soundOn}
+            onClick={toggleSound}
+          >
+            {soundOn ? "SFX" : "OFF"}
+          </button>
         </div>
         <div className={styles.activeBadge} data-team={hud.activeTeam}>
           <span>{active.short}</span>
@@ -1272,8 +1642,8 @@ export default function FlickFootball() {
             <div className={styles.livePill}><span /> LIVE MULTIPLAYER</div>
             <div className={styles.brandBall} aria-hidden="true"><i /><b>XI</b></div>
             <p className={styles.eyebrow}>FLICK FOOTBALL</p>
-            <h1>Find a rival.<br />Own the pitch.</h1>
-            <p className={styles.matchCopy}>Two players, one live match. The game begins only when another player joins the queue.</p>
+            <h1>Your pitch.<br />Your match.</h1>
+            <p className={styles.matchCopy}>Find a rival now, or create a private room and invite one friend.</p>
             <label className={styles.nameField}>
               <span>PLAYER NAME</span>
               <input
@@ -1284,10 +1654,126 @@ export default function FlickFootball() {
               />
             </label>
             {networkMessage ? <p className={styles.networkError}>{networkMessage}</p> : null}
-            <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
-              <span>PLAY ONLINE</span><b>1 VS 1</b>
-            </button>
+            <div className={styles.homeActions}>
+              <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
+                <span>QUICK MATCH</span><b>1 VS 1</b>
+              </button>
+              <button className={styles.roomButton} type="button" onClick={() => void createPrivateRoom()}>
+                <span><b>+</b><i>CREATE PRIVATE ROOM</i></span><small>GET CODE</small>
+              </button>
+              <button
+                className={styles.roomButton}
+                type="button"
+                onClick={() => {
+                  setNetworkMessage("");
+                  setOnlineStage("join-room");
+                }}
+              >
+                <span><b>→</b><i>JOIN A FRIEND</i></span><small>ENTER CODE</small>
+              </button>
+            </div>
             <button className={styles.practiceButton} type="button" onClick={startPractice}>PRACTICE ON THIS DEVICE</button>
+          </div>
+        </div>
+      ) : null}
+
+      {onlineStage === "join-room" ? (
+        <div className={styles.matchOverlay}>
+          <div className={`${styles.matchCard} ${styles.roomCard}`}>
+            <button
+              className={styles.backButton}
+              type="button"
+              onClick={() => {
+                closeSocket();
+                setRoomPending(false);
+                setNetworkMessage("");
+                setOnlineStage("menu");
+              }}
+            >
+              ← BACK
+            </button>
+            <div className={styles.roomMark} aria-hidden="true">#</div>
+            <p className={styles.eyebrow}>PRIVATE MATCH</p>
+            <h2>Join your friend</h2>
+            <p className={styles.matchCopy}>Enter the six-character code from their invitation.</p>
+            <label className={styles.nameField}>
+              <span>PLAYER NAME</span>
+              <input
+                value={playerName}
+                maxLength={18}
+                onChange={(event) => setPlayerName(event.target.value)}
+                aria-label="Player name"
+              />
+            </label>
+            <label className={styles.codeField}>
+              <span>ROOM CODE</span>
+              <input
+                autoFocus
+                autoCapitalize="characters"
+                autoComplete="off"
+                inputMode="text"
+                value={roomCode}
+                maxLength={6}
+                placeholder="ABC123"
+                onChange={(event) => {
+                  setRoomCode(normalizeRoomCode(event.target.value));
+                  setNetworkMessage("");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && roomCode.length === 6 && !roomPending) {
+                    void joinPrivateRoom();
+                  }
+                }}
+                aria-label="Six-character room code"
+              />
+            </label>
+            {networkMessage ? <p className={styles.networkError}>{networkMessage}</p> : null}
+            <button
+              className={styles.onlineButton}
+              type="button"
+              disabled={roomPending || roomCode.length !== 6}
+              onClick={() => void joinPrivateRoom()}
+            >
+              <span>{roomPending ? "JOINING ROOM..." : "JOIN ROOM"}</span><b>PLAY</b>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {onlineStage === "waiting-room" ? (
+        <div className={styles.matchOverlay}>
+          <div className={`${styles.matchCard} ${styles.roomCard}`}>
+            <div className={styles.livePill}><span /> PRIVATE ROOM</div>
+            {roomPending && !roomCode ? (
+              <div className={styles.miniLoader} aria-label="Creating room" />
+            ) : (
+              <div className={styles.waitingPlayers} aria-hidden="true">
+                <span>YOU</span><i>···</i><span>?</span>
+              </div>
+            )}
+            <p className={styles.eyebrow}>{roomPending && !roomCode ? "CREATING ROOM" : "ROOM IS READY"}</p>
+            <h2>{roomPending && !roomCode ? "Preparing your pitch" : "Invite your rival"}</h2>
+            <p className={styles.matchCopy}>
+              {roomPending && !roomCode
+                ? "Generating a private room code..."
+                : "Share this code or invite link. The game starts when your friend joins."}
+            </p>
+            {roomCode ? (
+              <div className={styles.roomCodeDisplay} aria-label={`Room code ${roomCode}`}>
+                {roomCode.split("").map((character, index) => <span key={`${character}-${index}`}>{character}</span>)}
+              </div>
+            ) : null}
+            {networkMessage ? <p className={styles.networkError}>{networkMessage}</p> : null}
+            <button
+              className={styles.onlineButton}
+              type="button"
+              disabled={!roomCode}
+              onClick={() => void sharePrivateRoom()}
+            >
+              <span>{roomCopied ? "INVITE COPIED" : "SHARE INVITE"}</span><b>{roomCopied ? "✓" : "↗"}</b>
+            </button>
+            <div className={styles.queueStatus}><span /> WAITING FOR ONE FRIEND</div>
+            <button className={styles.practiceButton} type="button" onClick={cancelPrivateRoom}>CANCEL ROOM</button>
           </div>
         </div>
       ) : null}

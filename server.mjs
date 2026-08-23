@@ -30,6 +30,9 @@ const io = new Server(httpServer, {
 const queue = [];
 const matches = new Map();
 const playerMatches = new Map();
+const privateRooms = new Map();
+const privateRoomByHost = new Map();
+const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function safeName(value, fallback) {
   if (typeof value !== "string") return fallback;
@@ -42,6 +45,30 @@ function removeFromQueue(socketId) {
   if (index >= 0) queue.splice(index, 1);
 }
 
+function removePrivateRoomForHost(socketId, notify = true) {
+  const code = privateRoomByHost.get(socketId);
+  if (!code) return;
+  privateRoomByHost.delete(socketId);
+  privateRooms.delete(code);
+  if (notify) io.to(`private:${code}`).emit("room:closed");
+}
+
+function createRoomCode() {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    let code = "";
+    for (let index = 0; index < 6; index += 1) {
+      code += ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)];
+    }
+    if (!privateRooms.has(code)) return code;
+  }
+  return randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase();
+}
+
+function cleanRoomCode(value) {
+  if (typeof value !== "string") return "";
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+}
+
 function getRoomForSocket(socket) {
   const matchId = playerMatches.get(socket.id);
   if (!matchId) return null;
@@ -52,7 +79,7 @@ function publicPlayer(player) {
   return { name: player.name, team: player.team };
 }
 
-function startMatch(firstEntry, secondEntry) {
+function startMatch(firstEntry, secondEntry, privateCode = null) {
   const firstSocket = io.sockets.sockets.get(firstEntry.socketId);
   const secondSocket = io.sockets.sockets.get(secondEntry.socketId);
   if (!firstSocket || !secondSocket) return;
@@ -64,6 +91,7 @@ function startMatch(firstEntry, secondEntry) {
     shotInProgress: false,
     finished: false,
     sequence: 0,
+    privateCode,
     rematchVotes: new Set(),
     players: [
       { socketId: firstSocket.id, name: firstEntry.name, team: "mint" },
@@ -85,6 +113,7 @@ function startMatch(firstEntry, secondEntry) {
       player: publicPlayer(player),
       opponent: publicPlayer(opponent),
       startsAt: Date.now() + 750,
+      roomCode: privateCode,
     });
   }
 }
@@ -142,6 +171,7 @@ io.on("connection", (socket) => {
   socket.on("match:find", (payload = {}) => {
     if (playerMatches.has(socket.id)) return;
     removeFromQueue(socket.id);
+    removePrivateRoomForHost(socket.id, false);
     const fallback = `Player ${socket.id.slice(0, 4).toUpperCase()}`;
     queue.push({ socketId: socket.id, name: safeName(payload.name, fallback) });
     socket.emit("match:searching", { position: queue.length });
@@ -151,6 +181,57 @@ io.on("connection", (socket) => {
   socket.on("match:cancel", () => {
     removeFromQueue(socket.id);
     socket.emit("match:cancelled");
+  });
+
+  socket.on("room:create", (payload = {}) => {
+    if (playerMatches.has(socket.id)) return;
+    removeFromQueue(socket.id);
+    removePrivateRoomForHost(socket.id, false);
+    const fallback = `Player ${socket.id.slice(0, 4).toUpperCase()}`;
+    const code = createRoomCode();
+    const room = {
+      code,
+      host: { socketId: socket.id, name: safeName(payload.name, fallback) },
+      createdAt: Date.now(),
+    };
+    privateRooms.set(code, room);
+    privateRoomByHost.set(socket.id, code);
+    socket.join(`private:${code}`);
+    socket.emit("room:created", { code });
+  });
+
+  socket.on("room:join", (payload = {}) => {
+    if (playerMatches.has(socket.id)) return;
+    removeFromQueue(socket.id);
+    const code = cleanRoomCode(payload.code);
+    if (code.length !== 6) {
+      socket.emit("room:error", { action: "join", message: "Enter a valid 6-character room code." });
+      return;
+    }
+    const privateRoom = privateRooms.get(code);
+    const hostSocket = privateRoom ? io.sockets.sockets.get(privateRoom.host.socketId) : null;
+    if (!privateRoom || !hostSocket) {
+      if (privateRoom) {
+        privateRooms.delete(code);
+        privateRoomByHost.delete(privateRoom.host.socketId);
+      }
+      socket.emit("room:error", { action: "join", message: "Room not found or no longer available." });
+      return;
+    }
+    if (privateRoom.host.socketId === socket.id) {
+      socket.emit("room:error", { action: "join", message: "Share this code with a different player." });
+      return;
+    }
+    const fallback = `Player ${socket.id.slice(0, 4).toUpperCase()}`;
+    const guest = { socketId: socket.id, name: safeName(payload.name, fallback) };
+    privateRooms.delete(code);
+    privateRoomByHost.delete(privateRoom.host.socketId);
+    startMatch(privateRoom.host, guest, code);
+  });
+
+  socket.on("room:cancel", () => {
+    removePrivateRoomForHost(socket.id);
+    socket.emit("room:cancelled");
   });
 
   socket.on("game:shoot", (payload) => {
@@ -207,6 +288,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     removeFromQueue(socket.id);
+    removePrivateRoomForHost(socket.id);
     const matchId = playerMatches.get(socket.id);
     if (!matchId) return;
     const room = matches.get(matchId);
