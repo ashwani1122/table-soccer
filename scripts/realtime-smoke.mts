@@ -1,7 +1,11 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
-import { advanceBallRoll, calculatePossessionImpact } from "../src/lib/game-physics.ts";
+import {
+  advanceBallRoll,
+  calculatePossessionImpact,
+  isWithinPassControl,
+} from "../src/lib/game-physics.ts";
 import { registerGameSocket } from "../src/lib/realtime-game.ts";
 
 type Frame = { event: string; payload?: Record<string, unknown> };
@@ -30,6 +34,11 @@ assert.equal(eastRoll.angle, 0);
 const northWestRoll = advanceBallRoll(eastRoll.phase, eastRoll.angle, -6, -6, 12);
 assert(northWestRoll.phase > eastRoll.phase);
 assert(northWestRoll.angle < -Math.PI / 2);
+
+const passPlayer = { x: 100, y: 100, radius: 19 };
+const passBall = { x: 138, y: 100, radius: 12 };
+assert.equal(isWithinPassControl(passPlayer, passBall, 7), true);
+assert.equal(isWithinPassControl(passPlayer, { ...passBall, x: 138.1 }, 7), false);
 
 class FakeSocket extends EventEmitter {
   readyState = 1;

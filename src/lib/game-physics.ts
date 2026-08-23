@@ -5,6 +5,15 @@ export type CollisionBody = {
   mass: number;
 };
 
+export function isWithinPassControl(
+  player: Pick<CollisionBody, "x" | "y" | "radius">,
+  ball: Pick<CollisionBody, "x" | "y" | "radius">,
+  controlGap: number,
+) {
+  const controlDistance = player.radius + ball.radius + Math.max(0, controlGap);
+  return Math.hypot(player.x - ball.x, player.y - ball.y) <= controlDistance;
+}
+
 export type PossessionImpact = {
   travel: number;
   normalX: number;
