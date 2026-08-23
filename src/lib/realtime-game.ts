@@ -9,10 +9,13 @@ type QueueEntry = {
   socketId: string;
   clientId: string;
   name: string;
+  isBot?: boolean;
+  queuedAt?: number;
 };
 
 type Player = QueueEntry & {
   team: Team;
+  isBot: boolean;
   disconnectedAt: number | null;
 };
 
@@ -23,6 +26,14 @@ type RelayedShot = {
   pull: number;
   sequence: number;
   serverTime: number;
+};
+
+type BotShot = Omit<RelayedShot, "sequence" | "serverTime">;
+
+type BotAction = {
+  stage: "thinking" | "aiming";
+  dueAt: number;
+  shot: BotShot | null;
 };
 
 type MatchRoom = {
@@ -36,6 +47,7 @@ type MatchRoom = {
   lastSnapshot: unknown | null;
   snapshotSequence: number;
   lastShot: RelayedShot | null;
+  botAction: BotAction | null;
   players: [Player, Player];
 };
 
@@ -84,6 +96,8 @@ type LocalHub = {
   streaming: boolean;
   lastEventId: string;
   heartbeat: ReturnType<typeof setInterval> | null;
+  botTimers: Map<string, ReturnType<typeof setTimeout>>;
+  queueBotTimers: Map<string, ReturnType<typeof setTimeout>>;
 };
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -93,6 +107,11 @@ const EVENT_STREAM = "flickxi:v2:events";
 const CONNECTION_PREFIX = "flickxi:v2:connection:";
 const CONNECTION_TTL_SECONDS = 35;
 const RECONNECT_GRACE_MS = 30_000;
+const BOT_MATCH_DELAY_MS = 6_000;
+const BOT_THINK_MIN_MS = 650;
+const BOT_THINK_VARIANCE_MS = 550;
+const BOT_AIM_MIN_MS = 700;
+const BOT_AIM_VARIANCE_MS = 450;
 const HEARTBEAT_MS = 10_000;
 const STREAM_BLOCK_MS = 5_000;
 const STREAM_MAX_LENGTH = 2_000;
@@ -123,8 +142,12 @@ const hub: LocalHub = globalForRealtime.__flickXiHub ??
     streaming: false,
     lastEventId: "0-0",
     heartbeat: null,
+    botTimers: new Map(),
+    queueBotTimers: new Map(),
   });
 hub.socketTasks ??= new Map();
+hub.botTimers ??= new Map();
+hub.queueBotTimers ??= new Map();
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -153,10 +176,21 @@ function deserializeState(raw: string | null): GameState {
     const saved = JSON.parse(raw) as Partial<SavedGameState>;
     return {
       queue: Array.isArray(saved.queue) ? saved.queue : [],
-      matches: new Map((Array.isArray(saved.matches) ? saved.matches : []).map((room) => [
-        room.id,
-        { ...room, rematchVotes: new Set(room.rematchVotes) },
-      ])),
+      matches: new Map((Array.isArray(saved.matches) ? saved.matches : []).map((room) => {
+        const players = room.players.map((player) => ({
+          ...player,
+          isBot: player.isBot === true,
+        })) as [Player, Player];
+        return [
+          room.id,
+          {
+            ...room,
+            players,
+            botAction: room.botAction ?? null,
+            rematchVotes: new Set(room.rematchVotes),
+          },
+        ];
+      })),
       playerMatches: new Map(Array.isArray(saved.playerMatches) ? saved.playerMatches : []),
       clientMatches: new Map(Array.isArray(saved.clientMatches) ? saved.clientMatches : []),
       privateRooms: new Map(Array.isArray(saved.privateRooms) ? saved.privateRooms : []),
@@ -186,7 +220,11 @@ function direct(socketId: string, event: string, payload?: unknown): OutboundEve
 }
 
 function toMatch(room: MatchRoom, event: string, payload?: unknown): OutboundEvent {
-  return { targets: room.players.map((player) => player.socketId), event, payload };
+  return {
+    targets: room.players.filter((player) => !player.isBot).map((player) => player.socketId),
+    event,
+    payload,
+  };
 }
 
 async function acquireStateLock() {
@@ -270,12 +308,28 @@ function safeClientId(value: unknown, socketId: string) {
   return clean.length >= 12 ? clean : `legacy-${socketId}`;
 }
 
+function cancelQueueBotTimer(clientId: string) {
+  const timer = hub.queueBotTimers.get(clientId);
+  if (timer) clearTimeout(timer);
+  hub.queueBotTimers.delete(clientId);
+}
+
+function cancelBotTimer(matchId: string) {
+  const timer = hub.botTimers.get(matchId);
+  if (timer) clearTimeout(timer);
+  hub.botTimers.delete(matchId);
+}
+
 function removeFromQueue(state: GameState, socketId: string) {
   const index = state.queue.findIndex((entry) => entry.socketId === socketId);
-  if (index >= 0) state.queue.splice(index, 1);
+  if (index >= 0) {
+    const [removed] = state.queue.splice(index, 1);
+    if (removed) cancelQueueBotTimer(removed.clientId);
+  }
 }
 
 function removeClientFromQueue(state: GameState, clientId: string) {
+  cancelQueueBotTimer(clientId);
   state.queue = state.queue.filter((entry) => entry.clientId !== clientId);
 }
 
@@ -309,7 +363,7 @@ function cleanRoomCode(value: unknown) {
 }
 
 function publicPlayer(player: Player) {
-  return { name: player.name, team: player.team };
+  return { name: player.name, team: player.team, isBot: player.isBot };
 }
 
 function matchInfo(room: MatchRoom, player: Player) {
@@ -344,22 +398,26 @@ function startMatch(
     lastSnapshot: null,
     snapshotSequence: 0,
     lastShot: null,
+    botAction: null,
     players: [
-      { ...firstEntry, team: "mint", disconnectedAt: null },
-      { ...secondEntry, team: "coral", disconnectedAt: null },
+      { ...firstEntry, team: "mint", isBot: firstEntry.isBot === true, disconnectedAt: null },
+      { ...secondEntry, team: "coral", isBot: secondEntry.isBot === true, disconnectedAt: null },
     ],
   };
 
   state.matches.set(matchId, room);
   for (const player of room.players) {
+    cancelQueueBotTimer(player.clientId);
+    if (player.isBot) continue;
     state.playerMatches.set(player.socketId, matchId);
     state.clientMatches.set(player.clientId, matchId);
   }
 
-  for (const player of room.players) {
+  for (const player of room.players.filter((candidate) => !candidate.isBot)) {
     const info = matchInfo(room, player);
     if (info) outbound.push(direct(player.socketId, "match:found", info));
   }
+  prepareBotTurn(room);
 }
 
 async function attemptMatchmaking(state: GameState, outbound: OutboundEvent[]) {
@@ -381,6 +439,202 @@ async function attemptMatchmaking(state: GameState, outbound: OutboundEvent[]) {
     }
     startMatch(state, first, second, outbound);
   }
+}
+
+type BotBody = { id: string; x: number; y: number };
+
+const DEFAULT_BOT_BODIES: BotBody[] = [
+  { id: "coral-1", x: 210, y: 70 },
+  { id: "coral-2", x: 110, y: 158 },
+  { id: "coral-3", x: 210, y: 142 },
+  { id: "coral-4", x: 310, y: 158 },
+  { id: "coral-5", x: 158, y: 250 },
+  { id: "coral-6", x: 262, y: 250 },
+  { id: "mint-1", x: 210, y: 650 },
+  { id: "mint-2", x: 110, y: 562 },
+  { id: "mint-3", x: 210, y: 578 },
+  { id: "mint-4", x: 310, y: 562 },
+  { id: "mint-5", x: 158, y: 470 },
+  { id: "mint-6", x: 262, y: 470 },
+  { id: "ball", x: 210, y: 360 },
+];
+
+function botBodies(snapshot: unknown): BotBody[] {
+  const bodies = record(snapshot).bodies;
+  if (!Array.isArray(bodies)) return DEFAULT_BOT_BODIES;
+  const parsed = bodies.flatMap((body) => {
+    const value = record(body);
+    const id = typeof value.id === "string" ? value.id : "";
+    const x = Number(value.x);
+    const y = Number(value.y);
+    return id && Number.isFinite(x) && Number.isFinite(y) ? [{ id, x, y }] : [];
+  });
+  return parsed.length === 13 ? parsed : DEFAULT_BOT_BODIES;
+}
+
+function botShot(room: MatchRoom): BotShot | null {
+  const bot = room.players.find((player) => player.isBot && player.team === room.activeTeam);
+  if (!bot) return null;
+  const snapshot = record(room.lastSnapshot);
+  const bodies = botBodies(room.lastSnapshot);
+  const ball = bodies.find((body) => body.id === "ball");
+  if (!ball) return null;
+  const goal = { x: 210, y: bot.team === "mint" ? 30 : 690 };
+  const carrierId = typeof snapshot.carrierId === "string" ? snapshot.carrierId : null;
+  const carrier = carrierId?.startsWith(`${bot.team}-`)
+    ? bodies.find((body) => body.id === carrierId)
+    : null;
+
+  if (carrier) {
+    const dx = goal.x - ball.x;
+    const dy = goal.y - ball.y;
+    const error = (Math.random() - 0.5) * 0.055;
+    const angle = Math.atan2(dy, dx) + error;
+    return {
+      bodyId: carrier.id,
+      dirX: Math.cos(angle),
+      dirY: Math.sin(angle),
+      pull: 74 + Math.random() * 14,
+    };
+  }
+
+  const goalX = goal.x - ball.x;
+  const goalY = goal.y - ball.y;
+  const goalLength = Math.max(1, Math.hypot(goalX, goalY));
+  const desiredX = goalX / goalLength;
+  const desiredY = goalY / goalLength;
+  const candidates = bodies
+    .filter((body) => body.id.startsWith(`${bot.team}-`))
+    .map((body) => {
+      const dx = ball.x - body.x;
+      const dy = ball.y - body.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const dirX = dx / distance;
+      const dirY = dy / distance;
+      const alignment = dirX * desiredX + dirY * desiredY;
+      return { body, distance, dirX, dirY, score: distance - alignment * 145 };
+    })
+    .sort((first, second) => first.score - second.score);
+  const selected = candidates[0];
+  if (!selected) return null;
+  const error = (Math.random() - 0.5) * 0.09;
+  const angle = Math.atan2(selected.dirY, selected.dirX) + error;
+  return {
+    bodyId: selected.body.id,
+    dirX: Math.cos(angle),
+    dirY: Math.sin(angle),
+    pull: Math.min(90, 48 + selected.distance * 0.3 + Math.random() * 8),
+  };
+}
+
+function botPlayerForTurn(room: MatchRoom) {
+  return room.players.find((player) => player.isBot && player.team === room.activeTeam) ?? null;
+}
+
+function scheduleBotWake(matchId: string, dueAt: number) {
+  cancelBotTimer(matchId);
+  const timer = setTimeout(() => {
+    hub.botTimers.delete(matchId);
+    void withGameState((state) => advanceBotMatch(state, matchId)).catch((error) => {
+      console.error("[FlickXI] Bot turn failed", error);
+    });
+  }, Math.max(0, dueAt - Date.now()));
+  timer.unref?.();
+  hub.botTimers.set(matchId, timer);
+}
+
+function prepareBotTurn(room: MatchRoom) {
+  if (!botPlayerForTurn(room) || room.finished || room.shotInProgress || room.botAction) return;
+  room.botAction = {
+    stage: "thinking",
+    dueAt: Date.now() + BOT_THINK_MIN_MS + Math.random() * BOT_THINK_VARIANCE_MS,
+    shot: null,
+  };
+  scheduleBotWake(room.id, room.botAction.dueAt);
+}
+
+function advanceBotMatch(state: GameState, matchId: string) {
+  const outbound: OutboundEvent[] = [];
+  const room = state.matches.get(matchId);
+  if (!room?.botAction || !botPlayerForTurn(room) || room.finished || room.shotInProgress) {
+    cancelBotTimer(matchId);
+    return outbound;
+  }
+  const human = room.players.find((player) => !player.isBot);
+  if (!human || human.disconnectedAt !== null) {
+    room.botAction.dueAt = Date.now() + 1_000;
+    scheduleBotWake(room.id, room.botAction.dueAt);
+    return outbound;
+  }
+  if (Date.now() < room.botAction.dueAt) {
+    scheduleBotWake(room.id, room.botAction.dueAt);
+    return outbound;
+  }
+
+  if (room.botAction.stage === "thinking") {
+    const shot = botShot(room);
+    if (!shot) {
+      room.botAction.dueAt = Date.now() + 1_000;
+      scheduleBotWake(room.id, room.botAction.dueAt);
+      return outbound;
+    }
+    room.botAction = {
+      stage: "aiming",
+      dueAt: Date.now() + BOT_AIM_MIN_MS + Math.random() * BOT_AIM_VARIANCE_MS,
+      shot,
+    };
+    outbound.push(direct(human.socketId, "game:aim", {
+      ...shot,
+      serverTime: Date.now(),
+    }));
+    scheduleBotWake(room.id, room.botAction.dueAt);
+    return outbound;
+  }
+
+  const shot = room.botAction.shot;
+  room.botAction = null;
+  if (!shot) return outbound;
+  room.shotInProgress = true;
+  room.sequence += 1;
+  room.lastShot = {
+    ...shot,
+    sequence: room.sequence,
+    serverTime: Date.now(),
+  };
+  outbound.push(direct(human.socketId, "game:aim-clear"));
+  outbound.push(toMatch(room, "game:shot", room.lastShot));
+  return outbound;
+}
+
+function scheduleBotFallback(entry: QueueEntry) {
+  cancelQueueBotTimer(entry.clientId);
+  const dueAt = (entry.queuedAt ?? Date.now()) + BOT_MATCH_DELAY_MS;
+  const timer = setTimeout(() => {
+    hub.queueBotTimers.delete(entry.clientId);
+    void withGameState(async (state) => {
+      const outbound: OutboundEvent[] = [];
+      const index = state.queue.findIndex((candidate) => candidate.clientId === entry.clientId);
+      if (index < 0) return outbound;
+      const queued = state.queue[index];
+      if (!queued || !(await connectionIsAlive(queued.socketId))) {
+        state.queue.splice(index, 1);
+        return outbound;
+      }
+      state.queue.splice(index, 1);
+      const botId = randomUUID();
+      startMatch(state, queued, {
+        socketId: `bot-${botId}`,
+        clientId: `bot-${botId}`,
+        name: "FlickBot",
+        isBot: true,
+      }, outbound);
+      return outbound;
+    }).catch((error) => {
+      console.error("[FlickXI] Bot matchmaking failed", error);
+    });
+  }, Math.max(0, dueAt - Date.now()));
+  timer.unref?.();
+  hub.queueBotTimers.set(entry.clientId, timer);
 }
 
 function validShot(payload: unknown, team: Team) {
@@ -441,6 +695,7 @@ function getRoom(state: GameState, socketId: string) {
 }
 
 function deleteMatch(state: GameState, room: MatchRoom) {
+  cancelBotTimer(room.id);
   for (const player of room.players) {
     state.playerMatches.delete(player.socketId);
     state.clientMatches.delete(player.clientId);
@@ -501,6 +756,8 @@ async function resumeSession(
       }));
     }
     if (room.lastShot) outbound.push(direct(socketId, "game:shot", room.lastShot));
+    if (room.botAction) scheduleBotWake(room.id, room.botAction.dueAt);
+    else prepareBotTurn(room);
     return outbound;
   }
 
@@ -508,6 +765,7 @@ async function resumeSession(
   if (queued) {
     state.playerMatches.delete(queued.socketId);
     queued.socketId = socketId;
+    scheduleBotFallback(queued);
     outbound.push(direct(socketId, "session:resumed", { scope: "queue" }));
     outbound.push(direct(socketId, "match:searching", { position: state.queue.indexOf(queued) + 1 }));
     return outbound;
@@ -544,7 +802,14 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       removeClientFromQueue(state, clientId);
       removePrivateRoomForHost(state, socketId, outbound, false);
       const fallback = `Player ${socketId.slice(0, 4).toUpperCase()}`;
-      state.queue.push({ socketId, clientId, name: safeName(value.name, fallback) });
+      const entry = {
+        socketId,
+        clientId,
+        name: safeName(value.name, fallback),
+        queuedAt: Date.now(),
+      };
+      state.queue.push(entry);
+      scheduleBotFallback(entry);
       outbound.push(direct(socketId, "match:searching", { position: state.queue.length }));
       await attemptMatchmaking(state, outbound);
       return outbound;
@@ -675,7 +940,11 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       const room = getRoom(state, socketId);
       if (!room || value.matchId !== room.id || !validSnapshot(value.snapshot)) return outbound;
       const player = room.players.find((candidate) => candidate.socketId === socketId);
-      if (!player || player.team !== room.activeTeam) return outbound;
+      const activePlayer = room.players.find((candidate) => candidate.team === room.activeTeam);
+      const canSettleTurn = player && (
+        player.team === room.activeTeam || (activePlayer?.isBot === true && player.isBot === false)
+      );
+      if (!canSettleTurn) return outbound;
       const snapshot = record(value.snapshot);
       room.activeTeam = snapshot.activeTeam as Team;
       room.finished = snapshot.phase === "finished";
@@ -683,17 +952,22 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       room.lastSnapshot = value.snapshot;
       room.snapshotSequence = room.sequence;
       room.lastShot = null;
+      room.botAction = null;
+      cancelBotTimer(room.id);
       outbound.push(toMatch(room, "game:sync", {
         snapshot: value.snapshot,
         sequence: room.sequence,
         serverTime: Date.now(),
       }));
+      prepareBotTurn(room);
       return outbound;
     }
     case "match:rematch": {
       const room = getRoom(state, socketId);
       if (!room || !room.finished) return outbound;
       room.rematchVotes.add(socketId);
+      const bot = room.players.find((player) => player.isBot);
+      if (bot) room.rematchVotes.add(bot.socketId);
       outbound.push(toMatch(room, "match:rematch-status", {
         ready: room.rematchVotes.size,
         needed: 2,
@@ -707,10 +981,12 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
         room.lastSnapshot = null;
         room.snapshotSequence = room.sequence;
         room.lastShot = null;
+        room.botAction = null;
         outbound.push(toMatch(room, "match:reset", {
           activeTeam: room.activeTeam,
           sequence: room.sequence,
         }));
+        prepareBotTurn(room);
       }
       return outbound;
     }
@@ -749,7 +1025,14 @@ function cleanupState(state: GameState, socketId: string) {
 async function pruneDisconnected(state: GameState) {
   const outbound: OutboundEvent[] = [];
   const queueStatus = await Promise.all(state.queue.map((entry) => connectionIsAlive(entry.socketId)));
-  state.queue = state.queue.filter((_, index) => queueStatus[index]);
+  state.queue = state.queue.filter((entry, index) => {
+    if (queueStatus[index]) {
+      if (!hub.queueBotTimers.has(entry.clientId)) scheduleBotFallback(entry);
+      return true;
+    }
+    cancelQueueBotTimer(entry.clientId);
+    return false;
+  });
 
   for (const [code, room] of state.privateRooms) {
     if (await connectionIsAlive(room.host.socketId)) continue;
@@ -758,7 +1041,9 @@ async function pruneDisconnected(state: GameState) {
   }
 
   for (const room of state.matches.values()) {
-    const alive = await Promise.all(room.players.map((player) => connectionIsAlive(player.socketId)));
+    const alive = await Promise.all(room.players.map((player) =>
+      player.isBot ? Promise.resolve(true) : connectionIsAlive(player.socketId)
+    ));
     room.players.forEach((player, index) => {
       if (!alive[index] && player.disconnectedAt === null) {
         state.playerMatches.delete(player.socketId);
@@ -779,6 +1064,13 @@ async function pruneDisconnected(state: GameState) {
       if (alive[index]) outbound.push(direct(player.socketId, "match:opponent-left"));
     });
     deleteMatch(state, room);
+  }
+  for (const room of state.matches.values()) {
+    if (room.botAction && !hub.botTimers.has(room.id)) {
+      scheduleBotWake(room.id, room.botAction.dueAt);
+    } else if (!room.botAction) {
+      prepareBotTurn(room);
+    }
   }
   return outbound;
 }

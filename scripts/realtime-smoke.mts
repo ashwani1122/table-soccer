@@ -35,6 +35,23 @@ function connect() {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
+async function waitForFrame(
+  socket: FakeSocket,
+  event: string,
+  predicate: (frame: Frame) => boolean = () => true,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const frame = socket.frames.findLast((candidate) =>
+      candidate.event === event && predicate(candidate)
+    );
+    if (frame) return frame;
+    await settle();
+  }
+  throw new Error(`Timed out waiting for ${event}`);
+}
+
 function snapshot(activeTeam: "mint" | "coral", phase = "ready") {
   return {
     activeTeam,
@@ -138,4 +155,52 @@ assert.equal(guest.latest("match:found")?.payload?.roomCode, code);
 
 host.close();
 guest.close();
-console.log("Realtime matchmaking, reconnect recovery, gameplay relay, rematch, and private-room checks passed.");
+
+const solo = connect();
+solo.receive("session:resume", { clientId: "smoke-solo-client", reconnecting: false });
+solo.receive("match:find", { clientId: "smoke-solo-client", name: "Solo" });
+const botMatch = await waitForFrame(
+  solo,
+  "match:found",
+  (frame) => typeof frame.payload?.opponent === "object" &&
+    frame.payload.opponent !== null &&
+    (frame.payload.opponent as Record<string, unknown>).isBot === true,
+);
+assert.equal((botMatch.payload?.opponent as Record<string, unknown>).name, "FlickBot");
+
+solo.receive("game:shoot", { bodyId: "mint-0", dirX: 0, dirY: -1, pull: 40 });
+await settle();
+solo.receive("game:settled", {
+  matchId: botMatch.payload?.matchId,
+  snapshot: snapshot("coral"),
+});
+const botAim = await waitForFrame(
+  solo,
+  "game:aim",
+  (frame) => typeof frame.payload?.bodyId === "string" && frame.payload.bodyId.startsWith("coral-"),
+);
+assert(Number(botAim.payload?.pull) >= 8);
+const botShot = await waitForFrame(
+  solo,
+  "game:shot",
+  (frame) => Number(frame.payload?.sequence) >= 2,
+);
+assert.equal(typeof botShot.payload?.bodyId, "string");
+solo.receive("game:settled", {
+  matchId: botMatch.payload?.matchId,
+  snapshot: snapshot("mint"),
+});
+await settle();
+assert.equal(solo.latest("game:sync")?.payload?.sequence, 2);
+solo.receive("game:settled", {
+  matchId: botMatch.payload?.matchId,
+  snapshot: snapshot("mint", "finished"),
+});
+await settle();
+solo.receive("match:rematch");
+await settle();
+assert.equal(solo.latest("match:reset")?.payload?.sequence, 3);
+solo.receive("match:leave");
+await settle();
+
+console.log("Realtime matchmaking, bot fallback, bot turns, reconnect recovery, gameplay relay, rematch, and private-room checks passed.");

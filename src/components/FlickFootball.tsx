@@ -89,8 +89,8 @@ type OnlineStage =
 type MatchInfo = {
   matchId: string;
   myTeam: Team;
-  player: { name: string; team: Team };
-  opponent: { name: string; team: Team };
+  player: { name: string; team: Team; isBot?: boolean };
+  opponent: { name: string; team: Team; isBot?: boolean };
   startsAt: number;
   roomCode?: string | null;
 };
@@ -1278,6 +1278,9 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       });
     };
 
+    const canPublishTurn = (authorityTeam: Team) =>
+      match?.myTeam === authorityTeam || match?.opponent.isBot === true;
+
     const broadcastAim = (drag: Drag, force = false) => {
       if (onlineStage !== "matched" || !match) return;
       const now = performance.now();
@@ -1482,7 +1485,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       }
       syncHud();
       celebrate(game.phase === "finished");
-      if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
+      if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
     };
 
     const updatePhysics = (dt: number, now: number) => {
@@ -1492,7 +1495,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         resetPositions(game, kickoff);
         syncHud();
         sounds?.turn();
-        if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
+        if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
         return;
       }
       if (game.phase !== "moving") return;
@@ -1712,7 +1715,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           sounds?.turn();
           syncHud();
         }
-        if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
+        if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
       }
     };
 
@@ -1732,7 +1735,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           switchTurn(game, "TIME'S UP");
           sounds?.turn();
           syncHud();
-          if (onlineStage === "matched" && match?.myTeam === authorityTeam) publishState();
+          if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
         }
       }
 
@@ -2073,8 +2076,10 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
             <div className={styles.searchOrb} aria-hidden="true"><i /><i /><span>VS</span></div>
             <p className={styles.eyebrow}>MATCHMAKING</p>
             <h2>Finding your opponent</h2>
-            <p className={styles.matchCopy}>Waiting for exactly one available player...</p>
-            <div className={styles.queueStatus}><span /> SEARCHING <b>{searchSeconds}s</b></div>
+            <p className={styles.matchCopy}>Searching for a real player. FlickBot joins after 6 seconds if nobody is available.</p>
+            <div className={styles.queueStatus}>
+              <span /> {searchSeconds >= 4 ? "PREPARING FLICKBOT" : "SEARCHING"} <b>{searchSeconds}s</b>
+            </div>
             <button className={styles.practiceButton} type="button" onClick={cancelSearch}>CANCEL SEARCH</button>
           </div>
         </div>
