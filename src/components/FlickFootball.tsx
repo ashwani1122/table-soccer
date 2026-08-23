@@ -14,11 +14,14 @@ const HEIGHT = 720;
 const FIELD = { left: 27, right: 393, top: 42, bottom: 678 };
 const GOAL_LEFT = 157;
 const GOAL_RIGHT = 263;
+const GOAL_CENTER_X = (GOAL_LEFT + GOAL_RIGHT) / 2;
 const MAX_PULL = 92;
-const MAX_SPEED = 1_040;
+const MAX_SPEED = 960;
 const BALL_RADIUS = 12;
-const BALL_WALL_RESTITUTION = 0.95;
-const BALL_COLLISION_RESTITUTION = 0.98;
+const BALL_WALL_RESTITUTION = 0.985;
+const BALL_COLLISION_RESTITUTION = 0.995;
+const BALL_FRICTION = 1;
+const PLAYER_FRICTION = 2;
 const TURN_TIME = 20;
 const PASS_GAP = 7;
 const PASS_ALIGN_DELAY = 1;
@@ -491,6 +494,13 @@ function rotateToward(
   return { x: Math.cos(angle), y: Math.sin(angle) };
 }
 
+function directionToOpponentGoal(body: Body, team: Team) {
+  const dx = GOAL_CENTER_X - body.x;
+  const dy = (team === "mint" ? FIELD.top : FIELD.bottom) - body.y;
+  const length = Math.max(0.001, Math.hypot(dx, dy));
+  return { x: dx / length, y: dy / length };
+}
+
 function constrainPlayerToPitch(body: Body) {
   if (body.x - body.radius < FIELD.left) {
     body.x = FIELD.left + body.radius;
@@ -758,6 +768,7 @@ function drawPlayer(
   activeTeam: Team,
   hideActiveRing: boolean,
   carrier: boolean,
+  carrierFacing: { x: number; y: number } | null,
   keepUpright: boolean,
   animationTime: number,
 ) {
@@ -810,12 +821,26 @@ function drawPlayer(
   ctx.fillRect(0, -body.radius, body.radius, body.radius * 2);
   ctx.restore();
 
-  const goalDirectionY = (body.team === "mint" ? -1 : 1) * (keepUpright ? -1 : 1);
+  const facing = carrierFacing ?? { x: 0, y: body.team === "mint" ? -1 : 1 };
+  const viewDirection = keepUpright
+    ? { x: -facing.x, y: -facing.y }
+    : facing;
+  const sideX = -viewDirection.y * 4.5;
+  const sideY = viewDirection.x * 4.5;
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.beginPath();
-  ctx.moveTo(0, goalDirectionY * (body.radius - 3));
-  ctx.lineTo(-4.5, goalDirectionY * (body.radius - 10));
-  ctx.lineTo(4.5, goalDirectionY * (body.radius - 10));
+  ctx.moveTo(
+    viewDirection.x * (body.radius - 3),
+    viewDirection.y * (body.radius - 3),
+  );
+  ctx.lineTo(
+    viewDirection.x * (body.radius - 10) + sideX,
+    viewDirection.y * (body.radius - 10) + sideY,
+  );
+  ctx.lineTo(
+    viewDirection.x * (body.radius - 10) - sideX,
+    viewDirection.y * (body.radius - 10) - sideY,
+  );
   ctx.closePath();
   ctx.fill();
 
@@ -923,6 +948,7 @@ function drawGame(
         game.activeTeam,
         visibleAim !== null,
         game.carrierId === body.id,
+        game.carrierId === body.id ? game.carrierOffset : null,
         flipped,
         animationTime,
       );
@@ -1678,7 +1704,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       const ball = game.bodies.find((body) => body.kind === "ball");
       if (!ball) return;
 
-      const damping = Math.exp(-2.0 * dt);
       for (const body of game.bodies) {
         const travelX = body.vx * dt;
         const travelY = body.vy * dt;
@@ -1695,6 +1720,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           body.rollPhase = roll.phase;
           body.rollAngle = roll.angle;
         }
+        const friction = body.kind === "ball" ? BALL_FRICTION : PLAYER_FRICTION;
+        const damping = Math.exp(-friction * dt);
         body.vx *= damping;
         body.vy *= damping;
         if (speed(body) < 5) {
@@ -1774,10 +1801,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               : { x: 0, y: playerBody.team === "mint" ? -1 : 1 };
             game.carrierId = playerBody.id;
             game.carrierOffset = contactDirection;
-            game.carrierTargetOffset = {
-              x: 0,
-              y: playerBody.team === "mint" ? -1 : 1,
-            };
+            game.carrierTargetOffset = directionToOpponentGoal(ballBody, playerBody.team as Team);
             game.carrierAlignDelay = PASS_ALIGN_DELAY;
             game.caughtThisMove = true;
             game.passChain += 1;
@@ -1805,8 +1829,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       if (game.carrierId && game.carrierOffset) {
         const carrier = game.bodies.find((body) => body.id === game.carrierId);
         if (carrier) {
-          const targetOffset = game.carrierTargetOffset;
+          const targetOffset = game.carrierTargetOffset
+            ? directionToOpponentGoal(ball, carrier.team as Team)
+            : null;
           if (targetOffset) {
+            game.carrierTargetOffset = targetOffset;
             game.carrierAlignDelay = Math.max(0, game.carrierAlignDelay - dt);
             if (game.carrierAlignDelay === 0) {
               const nextOffset = rotateToward(
