@@ -862,98 +862,178 @@ function drawPitch(ctx: CanvasRenderingContext2D) {
   drawCornerFlag(ctx, FIELD.right + 4, FIELD.bottom - 1, false, false);
 }
 
+function traceBallPentagon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  rotation: number,
+  scaleX = 1,
+) {
+  ctx.beginPath();
+  for (let point = 0; point < 5; point += 1) {
+    const angle = rotation + (Math.PI * 2 * point) / 5;
+    const pointX = x + Math.cos(angle) * radius * scaleX;
+    const pointY = y + Math.sin(angle) * radius;
+    if (point === 0) ctx.moveTo(pointX, pointY);
+    else ctx.lineTo(pointX, pointY);
+  }
+  ctx.closePath();
+}
+
 function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.save();
   ctx.translate(ball.x, ball.y);
-  ctx.shadowColor = "rgba(0,0,0,0.38)";
-  ctx.shadowBlur = 8;
-  ctx.shadowOffsetY = 3;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.32)";
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.ellipse(1.2, ball.radius * 0.46, ball.radius * 0.86, ball.radius * 0.43, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+
   const shell = ctx.createRadialGradient(
-    -ball.radius * 0.35,
     -ball.radius * 0.42,
-    ball.radius * 0.08,
-    0,
-    0,
-    ball.radius,
+    -ball.radius * 0.48,
+    ball.radius * 0.06,
+    ball.radius * 0.12,
+    ball.radius * 0.12,
+    ball.radius * 1.12,
   );
   shell.addColorStop(0, "#ffffff");
-  shell.addColorStop(0.68, "#f5f8fb");
-  shell.addColorStop(1, "#cbd3dc");
+  shell.addColorStop(0.52, "#f7f8f6");
+  shell.addColorStop(0.78, "#dfe4e5");
+  shell.addColorStop(1, "#929da3");
   ctx.fillStyle = shell;
   ctx.beginPath();
   ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.shadowColor = "transparent";
 
-  // Keep the light fixed while the surface pattern travels across the sphere.
-  // Rotating the whole drawing makes the ball look like a flat coin spinning.
+  // The panels travel inside a clipped sphere while the lighting remains fixed,
+  // which reads as a rolling football instead of a flat disc rotating in place.
   ctx.save();
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius - 1, 0, Math.PI * 2);
+  ctx.arc(0, 0, ball.radius - 0.8, 0, Math.PI * 2);
   ctx.clip();
   ctx.rotate(ball.rollAngle ?? 0);
 
   const phase = ball.rollPhase ?? 0;
-  const seamX = Math.sin(phase) * ball.radius * 0.64;
-  const seamWidth = Math.max(1.5, Math.abs(Math.cos(phase)) * ball.radius * 0.7);
-  ctx.strokeStyle = "rgba(20, 32, 45, 0.42)";
-  ctx.lineWidth = 1;
+  const centerX = Math.sin(phase) * ball.radius * 0.34;
+  const centerY = Math.sin(phase * 0.55) * ball.radius * 0.12;
+  const centerScaleX = 0.58 + Math.abs(Math.cos(phase)) * 0.42;
+  const seamX = Math.sin(phase) * ball.radius * 0.58;
+  const seamWidth = Math.max(1.2, Math.abs(Math.cos(phase)) * ball.radius * 0.67);
+
+  ctx.strokeStyle = "rgba(78, 88, 94, 0.62)";
+  ctx.lineWidth = 0.75;
   ctx.beginPath();
-  ctx.ellipse(seamX, 0, seamWidth, ball.radius * 0.96, 0, 0, Math.PI * 2);
+  ctx.ellipse(seamX, 0, seamWidth, ball.radius * 0.98, 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.beginPath();
   ctx.ellipse(
-    -seamX * 0.38,
+    -seamX * 0.34,
     0,
-    ball.radius * 0.9,
-    Math.max(1.2, seamWidth * 0.46),
+    ball.radius * 0.94,
+    Math.max(1.1, seamWidth * 0.44),
     0,
     0,
     Math.PI * 2,
   );
   ctx.stroke();
 
-  ctx.fillStyle = "#14202d";
+  const panels: Array<{ x: number; y: number; scale: number; depth: number }> = [];
   for (let i = 0; i < 5; i += 1) {
     const patchPhase = phase + (Math.PI * 2 * i) / 5;
     const depth = Math.cos(patchPhase);
-    if (depth < -0.12) continue;
-    const laneY = [-0.42, 0.34, -0.06, 0.46, -0.3][i] * ball.radius;
+    if (depth < -0.18) continue;
+    const laneY = [-0.58, 0.48, -0.08, 0.62, -0.38][i] * ball.radius;
     const horizontalRadius = Math.sqrt(Math.max(0, ball.radius ** 2 - laneY ** 2));
-    const patchX = Math.sin(patchPhase) * horizontalRadius * 0.78;
-    const scale = 0.42 + Math.max(0, depth) * 0.58;
+    const patchX = Math.sin(patchPhase) * horizontalRadius * 0.84;
+    const scale = 0.5 + Math.max(0, depth) * 0.5;
+    panels.push({ x: patchX, y: laneY, scale, depth });
+  }
+
+  ctx.strokeStyle = "rgba(73, 82, 87, 0.68)";
+  ctx.lineWidth = 0.8;
+  for (const panel of panels) {
     ctx.beginPath();
-    for (let point = 0; point < 5; point += 1) {
-      const angle = -Math.PI / 2 + (Math.PI * 2 * point) / 5;
-      const x = patchX + Math.cos(angle) * 3 * scale;
-      const y = laneY + Math.sin(angle) * 3.25 * scale;
-      if (point === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(panel.x, panel.y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#11181d";
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.78)";
+  ctx.lineWidth = 0.65;
+  traceBallPentagon(
+    ctx,
+    centerX,
+    centerY,
+    ball.radius * 0.3,
+    -Math.PI / 2 + phase * 0.08,
+    centerScaleX,
+  );
+  ctx.fill();
+  ctx.stroke();
+
+  for (const panel of panels) {
+    ctx.fillStyle = panel.depth > 0.3 ? "#0d1419" : "#263039";
+    traceBallPentagon(
+      ctx,
+      panel.x,
+      panel.y,
+      ball.radius * 0.27 * panel.scale,
+      -Math.PI / 2,
+      0.68 + Math.max(0, panel.depth) * 0.32,
+    );
     ctx.fill();
+    ctx.stroke();
   }
   ctx.restore();
 
-  const shine = ctx.createRadialGradient(
-    -ball.radius * 0.42,
-    -ball.radius * 0.5,
-    0,
-    -ball.radius * 0.42,
-    -ball.radius * 0.5,
+  const edgeShade = ctx.createRadialGradient(
+    -ball.radius * 0.32,
+    -ball.radius * 0.38,
     ball.radius * 0.38,
+    0,
+    0,
+    ball.radius * 1.08,
   );
-  shine.addColorStop(0, "rgba(255,255,255,0.82)");
+  edgeShade.addColorStop(0.5, "rgba(15, 25, 31, 0)");
+  edgeShade.addColorStop(0.82, "rgba(15, 25, 31, 0.08)");
+  edgeShade.addColorStop(1, "rgba(15, 25, 31, 0.34)");
+  ctx.fillStyle = edgeShade;
+  ctx.beginPath();
+  ctx.arc(0, 0, ball.radius - 0.45, 0, Math.PI * 2);
+  ctx.fill();
+
+  const shine = ctx.createRadialGradient(
+    -ball.radius * 0.46,
+    -ball.radius * 0.52,
+    0,
+    -ball.radius * 0.46,
+    -ball.radius * 0.52,
+    ball.radius * 0.44,
+  );
+  shine.addColorStop(0, "rgba(255,255,255,0.96)");
+  shine.addColorStop(0.35, "rgba(255,255,255,0.48)");
   shine.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = shine;
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius - 1, 0, Math.PI * 2);
+  ctx.arc(0, 0, ball.radius - 0.7, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "rgba(12, 25, 38, 0.72)";
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(7, 14, 18, 0.88)";
+  ctx.lineWidth = 1.25;
   ctx.beginPath();
   ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.46)";
+  ctx.lineWidth = 0.55;
+  ctx.beginPath();
+  ctx.arc(-0.35, -0.45, ball.radius - 1.35, Math.PI * 1.08, Math.PI * 1.78);
   ctx.stroke();
   ctx.restore();
 }
