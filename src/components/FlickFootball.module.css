@@ -27,6 +27,12 @@
   display: none;
 }
 
+.gameShell button:focus-visible,
+.gameShell input:focus-visible {
+  outline: 2px solid #8ef2c8;
+  outline-offset: 3px;
+}
+
 .scoreboard {
   height: 76px;
   display: grid;
@@ -183,6 +189,7 @@
   border-radius: 50%;
   background: #48e0aa;
   box-shadow: 0 0 0 4px rgba(72, 224, 170, 0.1);
+  animation: statusPulse 1.8s ease-in-out infinite;
 }
 
 .turnStrip[data-team="coral"] .liveDot {
@@ -266,6 +273,7 @@
   box-shadow: inset 0 0 0 1px rgba(255, 220, 102, 0.25);
   font-size: 1.55rem;
   font-weight: 900;
+  animation: iconPop 380ms cubic-bezier(0.2, 0.9, 0.35, 1.2) 70ms both;
 }
 
 .statusCard[data-tone="won"] .statusIcon {
@@ -292,6 +300,7 @@
   font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.16em;
+  animation: contentRise 240ms ease-out 100ms both;
 }
 
 .statusTitle {
@@ -301,6 +310,7 @@
   font-weight: 800;
   letter-spacing: -0.035em;
   line-height: 1.05;
+  animation: contentRise 240ms ease-out 130ms both;
 }
 
 .statusCard[data-tone="won"] .statusTitle {
@@ -321,6 +331,7 @@
   padding: 11px 12px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.065);
+  animation: contentRise 240ms ease-out 160ms both;
 }
 
 .statusScore span {
@@ -345,6 +356,7 @@
   color: #a4b7ac;
   font-size: 0.72rem;
   line-height: 1.55;
+  animation: contentRise 240ms ease-out 190ms both;
 }
 
 .statusActions {
@@ -352,6 +364,7 @@
   display: grid;
   gap: 9px;
   margin-top: 6px;
+  animation: contentRise 240ms ease-out 220ms both;
 }
 
 .statusActions .practiceButton {
@@ -400,8 +413,10 @@
   border: 0;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.06);
+  color: #dce9e4;
   cursor: pointer;
   font-size: 1.1rem;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
 }
 
 .rulesCard h2 {
@@ -424,7 +439,13 @@
   gap: 10px;
   padding: 12px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
+  animation: contentRise 220ms ease-out both;
 }
+
+.rulesCard li:nth-child(1) { animation-delay: 50ms; }
+.rulesCard li:nth-child(2) { animation-delay: 85ms; }
+.rulesCard li:nth-child(3) { animation-delay: 120ms; }
+.rulesCard li:nth-child(4) { animation-delay: 155ms; }
 
 .rulesCard li b {
   color: #eaf3fb;
@@ -449,6 +470,7 @@
   font-size: 0.7rem;
   font-weight: 950;
   letter-spacing: 0.08em;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 
 .matchOverlay {
@@ -503,6 +525,7 @@
   border-radius: 50%;
   background: #53e8ae;
   box-shadow: 0 0 0 4px rgba(83, 232, 174, 0.12), 0 0 12px rgba(83, 232, 174, 0.8);
+  animation: statusPulse 1.8s ease-in-out infinite;
 }
 
 .eyebrow {
@@ -562,11 +585,14 @@
   font: inherit;
   font-size: 0.78rem;
   font-weight: 800;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .nameField input:focus {
   border-color: rgba(72, 224, 170, 0.62);
+  background: rgba(255, 255, 255, 0.075);
   box-shadow: 0 0 0 3px rgba(72, 224, 170, 0.09);
+  transform: translateY(-1px);
 }
 
 .homeActions {
@@ -582,9 +608,11 @@
   font-family: inherit;
   font-weight: 950;
   letter-spacing: 0.08em;
+  transition: background 150ms ease, box-shadow 150ms ease, color 150ms ease, opacity 150ms ease, transform 150ms ease;
 }
 
 .onlineButton {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -594,6 +622,20 @@
   color: #071710;
   box-shadow: none;
   font-size: 0.7rem;
+  overflow: hidden;
+}
+
+.onlineButton::after {
+  content: "";
+  position: absolute;
+  top: -45%;
+  bottom: -45%;
+  left: -42%;
+  width: 28%;
+  background: rgba(255, 255, 255, 0.28);
+  pointer-events: none;
+  transform: skewX(-18deg);
+  transition: left 420ms ease;
 }
 
 .onlineButton b {
@@ -601,6 +643,7 @@
   border-radius: 7px;
   background: rgba(4, 24, 16, 0.12);
   font-size: 0.5rem;
+  transition: background 150ms ease, transform 150ms ease;
 }
 
 .onlineButton:disabled,
@@ -621,11 +664,7 @@
   color: #dce9f4;
   cursor: pointer;
   font-family: inherit;
-}
-
-.roomButton:hover {
-  background: rgba(103, 227, 178, 0.14);
-  color: #fff;
+  transition: background 150ms ease, box-shadow 150ms ease, color 150ms ease, opacity 150ms ease, transform 150ms ease;
 }
 
 .roomButton > span {
@@ -643,6 +682,7 @@
   background: rgba(103, 227, 178, 0.16);
   color: #67e3b2;
   font-size: 0.9rem;
+  transition: background 150ms ease, transform 150ms ease;
 }
 
 .roomButton i {
@@ -668,14 +708,11 @@
   font-size: 0.53rem;
 }
 
-.practiceButton:hover {
-  background: rgba(255, 255, 255, 0.13);
-}
-
 .networkError {
   margin: -2px 0 10px;
   color: #ff8b91;
   font-size: 0.62rem;
+  animation: errorNudge 260ms ease-out;
 }
 
 .roomCard {
@@ -695,6 +732,7 @@
   font-size: 0.5rem;
   font-weight: 900;
   letter-spacing: 0.09em;
+  transition: color 150ms ease, transform 150ms ease;
 }
 
 .roomMark {
@@ -740,6 +778,7 @@
   letter-spacing: 0.24em;
   text-align: center;
   text-transform: uppercase;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .codeField input::placeholder {
@@ -748,7 +787,9 @@
 
 .codeField input:focus {
   border-color: #67e3b2;
+  background: rgba(103, 227, 178, 0.08);
   box-shadow: 0 0 0 3px rgba(103, 227, 178, 0.09);
+  transform: translateY(-1px);
 }
 
 .roomCodeDisplay {
@@ -769,7 +810,14 @@
   box-shadow: inset 0 -7px 15px rgba(0, 0, 0, 0.12);
   font-size: clamp(0.83rem, 4vw, 1.12rem);
   font-weight: 950;
+  animation: codeReveal 260ms cubic-bezier(0.2, 0.85, 0.35, 1.12) both;
 }
+
+.roomCodeDisplay span:nth-child(2) { animation-delay: 35ms; }
+.roomCodeDisplay span:nth-child(3) { animation-delay: 70ms; }
+.roomCodeDisplay span:nth-child(4) { animation-delay: 105ms; }
+.roomCodeDisplay span:nth-child(5) { animation-delay: 140ms; }
+.roomCodeDisplay span:nth-child(6) { animation-delay: 175ms; }
 
 .waitingPlayers {
   display: flex;
@@ -879,6 +927,69 @@
   color: #e8f2fa;
 }
 
+.onlineButton:not(:disabled):active,
+.roomButton:not(:disabled):active,
+.practiceButton:active,
+.playButton:active {
+  transform: translateY(0) scale(0.975);
+}
+
+.onlineButton:disabled,
+.roomButton:disabled {
+  box-shadow: none;
+  transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .iconButton:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-1px) scale(1.04);
+  }
+
+  .onlineButton:not(:disabled):hover,
+  .playButton:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(72, 224, 170, 0.2);
+  }
+
+  .onlineButton:not(:disabled):hover::after {
+    left: 122%;
+  }
+
+  .onlineButton:not(:disabled):hover b {
+    background: rgba(4, 24, 16, 0.18);
+    transform: translateX(2px);
+  }
+
+  .roomButton:not(:disabled):hover {
+    background: rgba(103, 227, 178, 0.14);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+    color: #fff;
+    transform: translateY(-1px);
+  }
+
+  .roomButton:not(:disabled):hover b {
+    background: rgba(103, 227, 178, 0.22);
+    transform: rotate(-5deg) scale(1.04);
+  }
+
+  .practiceButton:hover {
+    background: rgba(255, 255, 255, 0.13);
+    transform: translateY(-1px);
+  }
+
+  .rulesTopline button:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    transform: rotate(7deg) scale(1.05);
+  }
+
+  .backButton:hover {
+    color: #b5c7d6;
+    transform: translateX(-2px);
+  }
+}
+
 .srOnly {
   position: absolute;
   width: 1px;
@@ -903,6 +1014,33 @@
 @keyframes modalPop {
   from { opacity: 0; transform: translateY(10px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes iconPop {
+  from { opacity: 0; transform: scale(0.58) rotate(-8deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+@keyframes contentRise {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.62; transform: scale(1.3); }
+}
+
+@keyframes codeReveal {
+  from { opacity: 0; transform: translateY(6px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes errorNudge {
+  0% { opacity: 0; transform: translateX(0); }
+  35% { opacity: 1; transform: translateX(-4px); }
+  70% { transform: translateX(3px); }
+  100% { transform: translateX(0); }
 }
 
 @keyframes spin {
@@ -938,10 +1076,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rulesBackdrop,
-  .rulesCard,
-  .statusBackdrop,
-  .statusCard {
-    animation: none;
+  .gameShell *,
+  .gameShell *::before,
+  .gameShell *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
