@@ -228,33 +228,6 @@
   user-select: none;
 }
 
-.powerHint {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: rgba(3, 13, 17, 0.7);
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 0.43rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  pointer-events: none;
-  transform: translateX(-50%);
-  backdrop-filter: blur(8px);
-}
-
-.powerHint i {
-  width: 30px;
-  height: 3px;
-  border-radius: 99px;
-  background: linear-gradient(90deg, #48e0aa, #ffd75a, #ff6d73);
-}
-
 .rulesBackdrop {
   position: fixed;
   z-index: 20;

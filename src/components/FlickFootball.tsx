@@ -2339,11 +2339,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           className={styles.canvas}
           aria-label="Interactive football pitch. Drag an active team disc backwards and release to shoot."
         />
-        <div className={styles.powerHint}>
-          <span>← PULL</span>
-          <i />
-          <span>POWER →</span>
-        </div>
       </div>
 
       {showRules ? (
