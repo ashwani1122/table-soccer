@@ -1347,9 +1347,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const [match, setMatch] = useState<MatchInfo | null>(null);
   const [playerName, setPlayerName] = useState("Ashwani");
   const [searchSeconds, setSearchSeconds] = useState(0);
-  const [rematchReady, setRematchReady] = useState(0);
   const [networkMessage, setNetworkMessage] = useState("");
-  const [soundOn, setSoundOn] = useState(true);
   const [roomCode, setRoomCode] = useState(initialCode);
   const [roomPending, setRoomPending] = useState(false);
   const [roomCopied, setRoomCopied] = useState(false);
@@ -1484,7 +1482,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setRoomPending(false);
         if (data.roomCode) setRoomCode(data.roomCode);
         setNetworkMessage("");
-        setRematchReady(0);
         setReconnecting(false);
         setOpponentReconnecting(false);
         opponentConnectedRef.current = true;
@@ -1520,15 +1517,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setNetworkMessage("Your opponent left the match.");
         setOnlineStage("disconnected");
       });
-      socket.on("match:rematch-status", ({ ready }: { ready: number }) => {
-        setRematchReady(ready);
-      });
       socket.on("match:reset", ({ activeTeam }: { activeTeam: Team }) => {
         connectionReadyRef.current = true;
         kickoffTeamRef.current = activeTeam;
         latestSyncRef.current = null;
         latestShotRef.current = null;
-        setRematchReady(0);
         setNetworkMessage("");
         setSession((value) => value + 1);
       });
@@ -1546,7 +1539,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setMatch(null);
     setRoomCode("");
     setNetworkMessage("");
-    setRematchReady(0);
     setSearchSeconds(0);
     setOnlineStage("searching");
     await connectRealtime(
@@ -1663,19 +1655,8 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setRoomCode("");
     setRoomPending(false);
     setNetworkMessage("");
-    setRematchReady(0);
     setOnlineStage("menu");
     setSession((value) => value + 1);
-  };
-
-  const toggleSound = () => {
-    const nextValue = !soundOn;
-    setSoundOn(nextValue);
-    soundRef.current?.setEnabled(nextValue);
-    if (nextValue) {
-      soundRef.current?.unlock();
-      soundRef.current?.turn();
-    }
   };
 
   useEffect(() => {
@@ -2275,7 +2256,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       setRoomCode("");
       setRoomPending(false);
       setNetworkMessage("");
-      setRematchReady(0);
       setOnlineStage("menu");
       setSession((value) => value + 1);
 
@@ -2286,7 +2266,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     return () => window.clearTimeout(timer);
   }, [hud.phase, onlineStage]);
 
-  const active = TEAM_META[hud.activeTeam];
   const nameForTeam = (team: Team) => {
     if (!match) return TEAM_META[team].name;
     return match.player.team === team ? match.player.name : match.opponent.name;
@@ -2300,17 +2279,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       : onlineStage === "matched" && match?.myTeam !== hud.activeTeam && hud.phase === "ready"
         ? "OPPONENT IS AIMING"
         : hud.message;
-
-  const requestRematch = () => {
-    if (onlineStage === "practice") {
-      kickoffTeamRef.current = "mint";
-      setSession((value) => value + 1);
-      return;
-    }
-    if (onlineStage === "matched" && hud.phase === "finished") {
-      socketRef.current?.emit("match:rematch");
-    }
-  };
 
   return (
     <section className={styles.gameShell} aria-label="FlickXI tabletop football game">
@@ -2373,39 +2341,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           <span>POWER →</span>
         </div>
       </div>
-
-      <footer className={styles.gameFooter}>
-        <div className={styles.emotes} aria-label="Quick reactions">
-          <button type="button" aria-label="Send fire reaction">🔥</button>
-          <button type="button" aria-label="Send applause reaction">👏</button>
-          <button type="button" aria-label="Send target reaction">🎯</button>
-          <button
-            className={styles.sfxButton}
-            type="button"
-            aria-label={soundOn ? "Mute sound effects" : "Enable sound effects"}
-            aria-pressed={soundOn}
-            onClick={toggleSound}
-          >
-            {soundOn ? "SFX" : "OFF"}
-          </button>
-        </div>
-        <div className={styles.activeBadge} data-team={hud.activeTeam}>
-          <span>{active.short}</span>
-          <div>
-            <small>ACTIVE TEAM</small>
-            <strong>{nameForTeam(hud.activeTeam)}</strong>
-          </div>
-        </div>
-        <button
-          className={styles.restartButton}
-          type="button"
-          onClick={requestRematch}
-          disabled={onlineStage === "matched" && hud.phase !== "finished"}
-        >
-          {onlineStage === "matched" && rematchReady > 0 ? <span>{rematchReady}/2 </span> : null}
-          ↻ <span>Restart</span>
-        </button>
-      </footer>
 
       {showRules ? (
         <div className={styles.rulesBackdrop} role="presentation" onClick={() => setShowRules(false)}>

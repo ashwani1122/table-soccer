@@ -4,7 +4,7 @@
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 28px;
-  background: #0a1321;
+  background: transparent;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
 }
 
@@ -15,7 +15,7 @@
   align-items: center;
   gap: 6px;
   padding: 10px 10px 8px;
-  background: rgba(9, 19, 32, 0.98);
+  background: transparent;
 }
 
 .iconButton {
@@ -143,7 +143,7 @@
   padding: 0 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.055);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: #0d1929;
+  background: transparent;
   color: #dce7f3;
   font-size: 0.54rem;
   font-weight: 900;
@@ -197,7 +197,7 @@
 
 .pitchFrame {
   position: relative;
-  background: #08251f;
+  background: transparent;
 }
 
 .canvas {
@@ -234,103 +234,6 @@
   height: 3px;
   border-radius: 99px;
   background: linear-gradient(90deg, #48e0aa, #ffd75a, #ff6d73);
-}
-
-.gameFooter {
-  min-height: 64px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: #091321;
-}
-
-.emotes {
-  display: flex;
-  gap: 4px;
-}
-
-.emotes button,
-.restartButton {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  cursor: pointer;
-}
-
-.emotes button {
-  width: 29px;
-  height: 29px;
-  border-radius: 50%;
-  font-size: 0.78rem;
-}
-
-.emotes button.sfxButton {
-  color: #65e3b1;
-  font-size: 0.42rem;
-  font-weight: 950;
-  letter-spacing: 0.04em;
-}
-
-.emotes button.sfxButton[aria-pressed="false"] {
-  color: #718399;
-}
-
-.activeBadge {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px 6px 7px;
-  border: 1px solid rgba(72, 224, 170, 0.18);
-  border-radius: 999px;
-  background: rgba(72, 224, 170, 0.075);
-}
-
-.activeBadge[data-team="coral"] {
-  border-color: rgba(255, 109, 115, 0.18);
-  background: rgba(255, 109, 115, 0.075);
-}
-
-.activeBadge > span {
-  width: 25px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #48e0aa 50%, #096f67 50%);
-  font-size: 0.55rem;
-  font-weight: 900;
-}
-
-.activeBadge[data-team="coral"] > span {
-  background: linear-gradient(135deg, #ff6d73 50%, #9f2446 50%);
-}
-
-.activeBadge div {
-  display: flex;
-  flex-direction: column;
-}
-
-.activeBadge small {
-  color: #65788e;
-  font-size: 0.4rem;
-  font-weight: 800;
-  letter-spacing: 0.09em;
-}
-
-.activeBadge strong {
-  font-size: 0.58rem;
-  letter-spacing: 0.04em;
-}
-
-.restartButton {
-  justify-self: end;
-  padding: 8px 10px;
-  border-radius: 10px;
-  color: #8fa1b6;
-  font-size: 0.62rem;
-  font-weight: 800;
 }
 
 .rulesBackdrop {
@@ -940,18 +843,6 @@
 }
 
 @media (max-width: 380px) {
-  .gameFooter {
-    grid-template-columns: 1fr auto;
-  }
-
-  .activeBadge {
-    display: none;
-  }
-
-  .restartButton {
-    grid-column: 2;
-  }
-
   .passPips span {
     display: none;
   }
