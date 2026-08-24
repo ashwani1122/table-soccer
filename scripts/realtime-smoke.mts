@@ -4,7 +4,10 @@ import type { WebSocket } from "ws";
 import {
   advanceBallRoll,
   calculatePossessionImpact,
+  capturePossessionMomentum,
+  constrainBodyToGoalArena,
   isWithinPassControl,
+  resolveBallPlayerCollision,
   resolvePossessedBallCollision,
 } from "../src/lib/game-physics.ts";
 import { registerGameSocket } from "../src/lib/realtime-game.ts";
@@ -41,6 +44,58 @@ const passBall = { x: 138, y: 100, radius: 12 };
 assert.equal(isWithinPassControl(passPlayer, passBall, 7), true);
 assert.equal(isWithinPassControl(passPlayer, { ...passBall, x: 138.1 }, 7), false);
 
+const passReceiver = { x: 100, y: 100, vx: -30, vy: 10, radius: 19, mass: 2.6 };
+const incomingBall = { x: 138, y: 100, vx: 900, vy: -100, radius: 12, mass: 0.7 };
+const momentumBefore = {
+  x: passReceiver.vx * passReceiver.mass + incomingBall.vx * incomingBall.mass,
+  y: passReceiver.vy * passReceiver.mass + incomingBall.vy * incomingBall.mass,
+};
+capturePossessionMomentum(passReceiver, incomingBall);
+assert.equal(passReceiver.vx, incomingBall.vx);
+assert.equal(passReceiver.vy, incomingBall.vy);
+assert(Math.abs(passReceiver.vx * (passReceiver.mass + incomingBall.mass) - momentumBefore.x) < 1e-9);
+assert(Math.abs(passReceiver.vy * (passReceiver.mass + incomingBall.mass) - momentumBefore.y) < 1e-9);
+assert(passReceiver.vx > 0, "a completed pass should carry the receiver forward");
+
+const softenedReceiver = { x: 100, y: 100, vx: 0, vy: 0, radius: 19, mass: 2.6 };
+const softenedBall = { x: 138, y: 100, vx: 900, vy: 0, radius: 12, mass: 0.7 };
+const fullCaptureSpeed = (softenedBall.vx * softenedBall.mass) /
+  (softenedReceiver.mass + softenedBall.mass);
+capturePossessionMomentum(softenedReceiver, softenedBall, 0.5);
+assert(Math.abs(softenedReceiver.vx - fullCaptureSpeed * 0.5) < 1e-9);
+assert.equal(softenedBall.vx, softenedReceiver.vx);
+
+const fullyMovedPlayer = { x: 0, y: 0, vx: 0, vy: 0, radius: 19, mass: 2.6 };
+const fullyMovingBall = { x: 30, y: 0, vx: -200, vy: 0, radius: 12, mass: 0.7 };
+const softlyMovedPlayer = { ...fullyMovedPlayer };
+const softlyMovingBall = { ...fullyMovingBall };
+assert.equal(resolveBallPlayerCollision(fullyMovedPlayer, fullyMovingBall, 0.9, 1), true);
+assert.equal(resolveBallPlayerCollision(softlyMovedPlayer, softlyMovingBall, 0.9, 0.5), true);
+assert(Math.abs(softlyMovedPlayer.vx - fullyMovedPlayer.vx * 0.5) < 1e-9);
+assert(Math.abs(softlyMovingBall.vx - fullyMovingBall.vx) < 1e-9);
+
+const testArena = {
+  left: 27,
+  right: 393,
+  top: 42,
+  bottom: 678,
+  goalLeft: 157,
+  goalRight: 263,
+  topGoalBack: 7,
+  bottomGoalBack: 713,
+};
+const enteringGoal = { x: 210, y: 37, vx: 0, vy: -180, radius: 19, mass: 2.6 };
+assert.equal(constrainBodyToGoalArena(enteringGoal, testArena, 0.84), false);
+assert.equal(enteringGoal.vy, -180, "the goal mouth must stay open for player discs");
+const hittingBackNet = { ...enteringGoal, y: 20 };
+assert.equal(constrainBodyToGoalArena(hittingBackNet, testArena, 0.84), true);
+assert.equal(hittingBackNet.y, 26);
+assert(hittingBackNet.vy > 0, "the back net should return a disc to the field");
+const hittingGoalPost = { x: 165, y: 55, vx: 0, vy: -180, radius: 19, mass: 2.6 };
+assert.equal(constrainBodyToGoalArena(hittingGoalPost, testArena, 0.84), true);
+assert.equal(hittingGoalPost.y, 61);
+assert(hittingGoalPost.vy > 0, "the end wall outside the goal mouth should still bounce");
+
 const collidingPlayer = { x: 0, y: 0, vx: 120, vy: 0, radius: 19, mass: 2.6 };
 const carriedBall = { x: 30, y: 0, vx: 0, vy: 0, radius: 12, mass: 0.7 };
 const ballCarrier = { x: 68, y: 0, vx: 0, vy: 0, radius: 19, mass: 2.6 };
@@ -50,6 +105,16 @@ assert(Math.hypot(carriedBall.x - collidingPlayer.x, carriedBall.y - collidingPl
 assert(Math.abs((ballCarrier.x - carriedBall.x) - attachmentBefore) < 1e-9);
 assert.equal(carriedBall.vx, ballCarrier.vx);
 assert(ballCarrier.vx > 0);
+
+const fullyMovedOpponent = { x: 0, y: 0, vx: 0, vy: 0, radius: 19, mass: 2.6 };
+const fullMovingCarrier = { x: 68, y: 0, vx: -200, vy: 0, radius: 19, mass: 2.6 };
+const fullMovingCarriedBall = { x: 30, y: 0, vx: -200, vy: 0, radius: 12, mass: 0.7 };
+const softlyMovedOpponent = { ...fullyMovedOpponent };
+const softMovingCarrier = { ...fullMovingCarrier };
+const softMovingCarriedBall = { ...fullMovingCarriedBall };
+resolvePossessedBallCollision(fullyMovedOpponent, fullMovingCarrier, fullMovingCarriedBall, 0.9, 1);
+resolvePossessedBallCollision(softlyMovedOpponent, softMovingCarrier, softMovingCarriedBall, 0.9, 0.5);
+assert(Math.abs(softlyMovedOpponent.vx - fullyMovedOpponent.vx * 0.5) < 1e-9);
 
 class FakeSocket extends EventEmitter {
   readyState = 1;

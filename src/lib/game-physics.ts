@@ -10,11 +10,110 @@ export type MovingCollisionBody = CollisionBody & {
   vy: number;
 };
 
+export type GoalArena = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  goalLeft: number;
+  goalRight: number;
+  topGoalBack: number;
+  bottomGoalBack: number;
+};
+
+export function capturePossessionMomentum(
+  receiver: MovingCollisionBody,
+  ball: MovingCollisionBody,
+  transferScale = 1,
+) {
+  const combinedMass = receiver.mass + ball.mass;
+  if (!Number.isFinite(combinedMass) || combinedMass <= 0.001) {
+    receiver.vx = 0;
+    receiver.vy = 0;
+    ball.vx = 0;
+    ball.vy = 0;
+    return { vx: 0, vy: 0 };
+  }
+
+  const receiverVx = receiver.vx;
+  const receiverVy = receiver.vy;
+  const mergedVx = (receiverVx * receiver.mass + ball.vx * ball.mass) / combinedMass;
+  const mergedVy = (receiverVy * receiver.mass + ball.vy * ball.mass) / combinedMass;
+  const retainedTransfer = Math.max(0, Math.min(1, transferScale));
+  const vx = receiverVx + (mergedVx - receiverVx) * retainedTransfer;
+  const vy = receiverVy + (mergedVy - receiverVy) * retainedTransfer;
+  receiver.vx = vx;
+  receiver.vy = vy;
+  ball.vx = vx;
+  ball.vy = vy;
+  return { vx, vy };
+}
+
+export function constrainBodyToGoalArena(
+  body: MovingCollisionBody,
+  arena: GoalArena,
+  restitution: number,
+) {
+  const bounce = Math.max(0, Math.min(1, restitution));
+  let collided = false;
+
+  const reboundLeft = (x: number) => {
+    body.x = x;
+    if (body.vx < 0) body.vx = Math.abs(body.vx) * bounce;
+    collided = true;
+  };
+  const reboundRight = (x: number) => {
+    body.x = x;
+    if (body.vx > 0) body.vx = -Math.abs(body.vx) * bounce;
+    collided = true;
+  };
+  const reboundTop = (y: number) => {
+    body.y = y;
+    if (body.vy < 0) body.vy = Math.abs(body.vy) * bounce;
+    collided = true;
+  };
+  const reboundBottom = (y: number) => {
+    body.y = y;
+    if (body.vy > 0) body.vy = -Math.abs(body.vy) * bounce;
+    collided = true;
+  };
+
+  if (body.y < arena.top) {
+    if (body.x - body.radius < arena.goalLeft) reboundLeft(arena.goalLeft + body.radius);
+    if (body.x + body.radius > arena.goalRight) reboundRight(arena.goalRight - body.radius);
+    if (body.y - body.radius < arena.topGoalBack) reboundTop(arena.topGoalBack + body.radius);
+    return collided;
+  }
+
+  if (body.y > arena.bottom) {
+    if (body.x - body.radius < arena.goalLeft) reboundLeft(arena.goalLeft + body.radius);
+    if (body.x + body.radius > arena.goalRight) reboundRight(arena.goalRight - body.radius);
+    if (body.y + body.radius > arena.bottomGoalBack) reboundBottom(arena.bottomGoalBack - body.radius);
+    return collided;
+  }
+
+  if (body.x - body.radius < arena.left) reboundLeft(arena.left + body.radius);
+  if (body.x + body.radius > arena.right) reboundRight(arena.right - body.radius);
+
+  const clearsGoalMouth =
+    body.x - body.radius >= arena.goalLeft &&
+    body.x + body.radius <= arena.goalRight;
+  if (!clearsGoalMouth && body.y - body.radius < arena.top) {
+    reboundTop(arena.top + body.radius);
+  }
+  if (!clearsGoalMouth && body.y + body.radius > arena.bottom) {
+    reboundBottom(arena.bottom - body.radius);
+  }
+
+  return collided;
+}
+
 export function resolvePossessedBallCollision(
   player: MovingCollisionBody,
   carrier: MovingCollisionBody,
   ball: MovingCollisionBody,
   restitution: number,
+  possessionToPlayerTransfer = 1,
 ) {
   let dx = ball.x - player.x;
   let dy = ball.y - player.y;
@@ -49,14 +148,65 @@ export function resolvePossessedBallCollision(
   if (closingSpeed < 0) {
     const impulse = (-(1 + restitution) * closingSpeed) /
       (1 / player.mass + 1 / possessionMass);
-    player.vx -= (impulse * normalX) / player.mass;
-    player.vy -= (impulse * normalY) / player.mass;
+    const playerTowardImpact = Math.max(0, player.vx * normalX + player.vy * normalY);
+    const possessionTowardPlayer = Math.max(0, -(carrier.vx * normalX + carrier.vy * normalY));
+    const playerResponse = possessionTowardPlayer > playerTowardImpact
+      ? Math.max(0, Math.min(1, possessionToPlayerTransfer))
+      : 1;
+    player.vx -= ((impulse * normalX) / player.mass) * playerResponse;
+    player.vy -= ((impulse * normalY) / player.mass) * playerResponse;
     carrier.vx += (impulse * normalX) / possessionMass;
     carrier.vy += (impulse * normalY) / possessionMass;
   }
 
   ball.vx = carrier.vx;
   ball.vy = carrier.vy;
+  return true;
+}
+
+export function resolveBallPlayerCollision(
+  player: MovingCollisionBody,
+  ball: MovingCollisionBody,
+  restitution: number,
+  ballToPlayerTransfer = 1,
+) {
+  let dx = ball.x - player.x;
+  let dy = ball.y - player.y;
+  let distance = Math.hypot(dx, dy);
+  const minimumDistance = player.radius + ball.radius;
+  if (distance >= minimumDistance) return false;
+
+  if (distance < 0.001) {
+    dx = 0.001;
+    dy = 0;
+    distance = 0.001;
+  }
+
+  const normalX = dx / distance;
+  const normalY = dy / distance;
+  const overlap = minimumDistance - distance;
+  const totalMass = player.mass + ball.mass;
+  player.x -= normalX * overlap * (ball.mass / totalMass);
+  player.y -= normalY * overlap * (ball.mass / totalMass);
+  ball.x += normalX * overlap * (player.mass / totalMass);
+  ball.y += normalY * overlap * (player.mass / totalMass);
+
+  const relativeX = ball.vx - player.vx;
+  const relativeY = ball.vy - player.vy;
+  const closingSpeed = relativeX * normalX + relativeY * normalY;
+  if (closingSpeed >= 0) return true;
+
+  const impulse = (-(1 + restitution) * closingSpeed) /
+    (1 / player.mass + 1 / ball.mass);
+  const playerTowardBall = Math.max(0, player.vx * normalX + player.vy * normalY);
+  const ballTowardPlayer = Math.max(0, -(ball.vx * normalX + ball.vy * normalY));
+  const playerResponse = ballTowardPlayer > playerTowardBall
+    ? Math.max(0, Math.min(1, ballToPlayerTransfer))
+    : 1;
+  player.vx -= ((impulse * normalX) / player.mass) * playerResponse;
+  player.vy -= ((impulse * normalY) / player.mass) * playerResponse;
+  ball.vx += (impulse * normalX) / ball.mass;
+  ball.vy += (impulse * normalY) / ball.mass;
   return true;
 }
 

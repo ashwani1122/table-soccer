@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   advanceBallRoll,
   calculatePossessionImpact,
+  capturePossessionMomentum,
+  constrainBodyToGoalArena,
   isWithinPassControl,
+  resolveBallPlayerCollision,
   resolvePossessedBallCollision,
 } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
@@ -16,6 +19,13 @@ const FIELD = { left: 27, right: 393, top: 42, bottom: 678 };
 const GOAL_LEFT = 157;
 const GOAL_RIGHT = 263;
 const GOAL_CENTER_X = (GOAL_LEFT + GOAL_RIGHT) / 2;
+const GOAL_ARENA = {
+  ...FIELD,
+  goalLeft: GOAL_LEFT,
+  goalRight: GOAL_RIGHT,
+  topGoalBack: 7,
+  bottomGoalBack: HEIGHT - 7,
+};
 const MAX_PULL = 92;
 const MAX_SPEED = 960;
 const BALL_RADIUS = 12;
@@ -23,9 +33,12 @@ const BALL_WALL_RESTITUTION = 0.985;
 const BALL_COLLISION_RESTITUTION = 0.995;
 const BALL_FRICTION = 1.15;
 const PLAYER_FRICTION = 2.2;
+const POSSESSION_FRICTION = 1.95;
 const TURN_TIME = 20;
 const PASS_GAP = 7;
 const PASS_ALIGN_DELAY = 1;
+const PASS_MOMENTUM_TRANSFER = 0.5;
+const BALL_TO_PLAYER_TRANSFER = 0.5;
 const RESULT_HOME_DELAY = 3_000;
 const AIM_BROADCAST_MS = 60;
 const SMOKE_MIN_SPEED = 150;
@@ -504,38 +517,11 @@ function directionToOpponentGoal(body: Body, team: Team) {
 }
 
 function constrainPlayerToPitch(body: Body) {
-  if (body.x - body.radius < FIELD.left) {
-    body.x = FIELD.left + body.radius;
-    if (body.vx < 0) body.vx = Math.abs(body.vx) * 0.84;
-  } else if (body.x + body.radius > FIELD.right) {
-    body.x = FIELD.right - body.radius;
-    if (body.vx > 0) body.vx = -Math.abs(body.vx) * 0.84;
-  }
-  if (body.y - body.radius < FIELD.top) {
-    body.y = FIELD.top + body.radius;
-    if (body.vy < 0) body.vy = Math.abs(body.vy) * 0.84;
-  } else if (body.y + body.radius > FIELD.bottom) {
-    body.y = FIELD.bottom - body.radius;
-    if (body.vy > 0) body.vy = -Math.abs(body.vy) * 0.84;
-  }
+  return constrainBodyToGoalArena(body, GOAL_ARENA, 0.84);
 }
 
 function constrainFreeBallToPitch(ball: Body) {
-  if (ball.x - ball.radius < FIELD.left) {
-    ball.x = FIELD.left + ball.radius;
-    if (ball.vx < 0) ball.vx = Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
-  } else if (ball.x + ball.radius > FIELD.right) {
-    ball.x = FIELD.right - ball.radius;
-    if (ball.vx > 0) ball.vx = -Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
-  }
-  const insideGoalMouth = ball.x > GOAL_LEFT && ball.x < GOAL_RIGHT;
-  if (!insideGoalMouth && ball.y - ball.radius < FIELD.top) {
-    ball.y = FIELD.top + ball.radius;
-    if (ball.vy < 0) ball.vy = Math.abs(ball.vy) * BALL_WALL_RESTITUTION;
-  } else if (!insideGoalMouth && ball.y + ball.radius > FIELD.bottom) {
-    ball.y = FIELD.bottom - ball.radius;
-    if (ball.vy > 0) ball.vy = -Math.abs(ball.vy) * BALL_WALL_RESTITUTION;
-  }
+  return constrainBodyToGoalArena(ball, GOAL_ARENA, BALL_WALL_RESTITUTION);
 }
 
 function lockBallToCarrier(
@@ -1932,7 +1918,12 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           body.rollPhase = roll.phase;
           body.rollAngle = roll.angle;
         }
-        const friction = body.kind === "ball" ? BALL_FRICTION : PLAYER_FRICTION;
+        const isPossessionBody = Boolean(
+          game.carrierId && (body.kind === "ball" || body.id === game.carrierId),
+        );
+        const friction = isPossessionBody
+          ? POSSESSION_FRICTION
+          : body.kind === "ball" ? BALL_FRICTION : PLAYER_FRICTION;
         const damping = Math.exp(-friction * dt);
         body.vx *= damping;
         body.vy *= damping;
@@ -1944,39 +1935,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
 
       for (const body of game.bodies) {
         if (body.kind === "ball" && game.carrierId) continue;
-        const wallRestitution = body.kind === "ball" ? BALL_WALL_RESTITUTION : 0.86;
-        if (body.x - body.radius < FIELD.left) {
-          sounds?.wall(Math.abs(body.vx) / MAX_SPEED);
-          body.x = FIELD.left + body.radius;
-          body.vx = Math.abs(body.vx) * wallRestitution;
-        } else if (body.x + body.radius > FIELD.right) {
-          sounds?.wall(Math.abs(body.vx) / MAX_SPEED);
-          body.x = FIELD.right - body.radius;
-          body.vx = -Math.abs(body.vx) * wallRestitution;
-        }
-
-        if (body.kind === "player") {
-          if (body.y - body.radius < FIELD.top) {
-            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
-            body.y = FIELD.top + body.radius;
-            body.vy = Math.abs(body.vy) * 0.86;
-          } else if (body.y + body.radius > FIELD.bottom) {
-            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
-            body.y = FIELD.bottom - body.radius;
-            body.vy = -Math.abs(body.vy) * 0.86;
-          }
-        } else {
-          const insideGoal = body.x > GOAL_LEFT && body.x < GOAL_RIGHT;
-          if (!insideGoal && body.y - body.radius < FIELD.top) {
-            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
-            body.y = FIELD.top + body.radius;
-            body.vy = Math.abs(body.vy) * BALL_WALL_RESTITUTION;
-          } else if (!insideGoal && body.y + body.radius > FIELD.bottom) {
-            sounds?.wall(Math.abs(body.vy) / MAX_SPEED);
-            body.y = FIELD.bottom - body.radius;
-            body.vy = -Math.abs(body.vy) * BALL_WALL_RESTITUTION;
-          }
-        }
+        const impactSpeed = speed(body);
+        const collided = body.kind === "player"
+          ? constrainPlayerToPitch(body)
+          : constrainFreeBallToPitch(body);
+        if (collided && impactSpeed > 20) sounds?.wall(impactSpeed / MAX_SPEED);
       }
 
       for (let solverPass = 0; solverPass < COLLISION_SOLVER_PASSES; solverPass += 1) {
@@ -2024,6 +1987,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
             game.caughtThisMove = true;
             game.passChain += 1;
             game.message = "NICE PASS - BALL CONTROLLED";
+            capturePossessionMomentum(playerBody, ballBody, PASS_MOMENTUM_TRANSFER);
             lockBallToCarrier(playerBody, ballBody, contactDirection);
             sounds?.pass();
             syncHud();
@@ -2042,6 +2006,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               carrier,
               ballBody,
               BALL_COLLISION_RESTITUTION,
+              BALL_TO_PLAYER_TRANSFER,
             );
             if (collided && solverPass === 0 && impactSpeed > 35) {
               sounds?.impact("ball", impactSpeed / MAX_SPEED);
@@ -2055,7 +2020,12 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
             playerBody.vy - ballBody.vy,
           );
           if (
-            resolveCollision(playerBody, ballBody, BALL_COLLISION_RESTITUTION) &&
+            resolveBallPlayerCollision(
+              playerBody,
+              ballBody,
+              BALL_COLLISION_RESTITUTION,
+              BALL_TO_PLAYER_TRANSFER,
+            ) &&
             solverPass === 0 &&
             impactSpeed > 35
           ) {
@@ -2098,10 +2068,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               const desiredCarrierY = ball.y - game.carrierOffset.y * controlDistance;
               carrier.x = desiredCarrierX;
               carrier.y = desiredCarrierY;
-              carrier.vx = 0;
-              carrier.vy = 0;
-              ball.vx = 0;
-              ball.vy = 0;
               constrainPlayerToPitch(carrier);
               ball.x += carrier.x - desiredCarrierX;
               ball.y += carrier.y - desiredCarrierY;
