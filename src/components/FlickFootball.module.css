@@ -317,11 +317,7 @@
   max-width: 72%;
   align-self: flex-start;
   filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.24));
-  animation: tableMessageIn 180ms cubic-bezier(0.2, 0.85, 0.35, 1.08);
-}
-
-.tableChatBubble[data-mine="true"] {
-  align-self: flex-end;
+  animation: tableMessagePopup 1s ease both;
 }
 
 .tableChatBubble span {
@@ -332,10 +328,6 @@
   font-weight: 950;
   letter-spacing: 0.09em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
-}
-
-.tableChatBubble[data-mine="true"] span {
-  text-align: right;
 }
 
 .tableChatBubble p {
@@ -349,12 +341,6 @@
   line-height: 1.35;
   overflow-wrap: anywhere;
   backdrop-filter: blur(8px);
-}
-
-.tableChatBubble[data-mine="true"] p {
-  border-color: rgba(103, 227, 178, 0.25);
-  border-radius: 12px 5px 12px 12px;
-  background: rgba(24, 91, 65, 0.86);
 }
 
 .chatPanel {
@@ -1496,9 +1482,10 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes tableMessageIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+@keyframes tableMessagePopup {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  14%, 78% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-5px) scale(0.98); }
 }
 
 @keyframes socialTrayIn {

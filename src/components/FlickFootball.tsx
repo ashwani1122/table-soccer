@@ -862,179 +862,248 @@ function drawPitch(ctx: CanvasRenderingContext2D) {
   drawCornerFlag(ctx, FIELD.right + 4, FIELD.bottom - 1, false, false);
 }
 
-function traceBallPentagon(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  rotation: number,
-  scaleX = 1,
-) {
-  ctx.beginPath();
-  for (let point = 0; point < 5; point += 1) {
-    const angle = rotation + (Math.PI * 2 * point) / 5;
-    const pointX = x + Math.cos(angle) * radius * scaleX;
-    const pointY = y + Math.sin(angle) * radius;
-    if (point === 0) ctx.moveTo(pointX, pointY);
-    else ctx.lineTo(pointX, pointY);
-  }
-  ctx.closePath();
+type BallVector = [number, number, number];
+
+const FOOTBALL_PHI = (1 + Math.sqrt(5)) / 2;
+const FOOTBALL_PANEL_CENTERS: BallVector[] = [
+  [0, -1, -FOOTBALL_PHI], [0, -1, FOOTBALL_PHI],
+  [0, 1, -FOOTBALL_PHI], [0, 1, FOOTBALL_PHI],
+  [-1, -FOOTBALL_PHI, 0], [-1, FOOTBALL_PHI, 0],
+  [1, -FOOTBALL_PHI, 0], [1, FOOTBALL_PHI, 0],
+  [-FOOTBALL_PHI, 0, -1], [-FOOTBALL_PHI, 0, 1],
+  [FOOTBALL_PHI, 0, -1], [FOOTBALL_PHI, 0, 1],
+].map(([x, y, z]) => {
+  const length = Math.hypot(x, y, z);
+  return [x / length, y / length, z / length];
+});
+
+function crossBallVectors(a: BallVector, b: BallVector): BallVector {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function normalizeBallVector([x, y, z]: BallVector): BallVector {
+  const length = Math.max(0.0001, Math.hypot(x, y, z));
+  return [x / length, y / length, z / length];
+}
+
+function rotateBallVector(
+  vector: BallVector,
+  axis: BallVector,
+  angle: number,
+): BallVector {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const dot = vector[0] * axis[0] + vector[1] * axis[1] + vector[2] * axis[2];
+  const cross = crossBallVectors(axis, vector);
+  return [
+    vector[0] * cosine + cross[0] * sine + axis[0] * dot * (1 - cosine),
+    vector[1] * cosine + cross[1] * sine + axis[1] * dot * (1 - cosine),
+    vector[2] * cosine + cross[2] * sine + axis[2] * dot * (1 - cosine),
+  ];
+}
+
+function orientFootballVector(vector: BallVector, rollAxis: BallVector, rollPhase: number) {
+  const presentationTilt = Math.atan(1 / FOOTBALL_PHI);
+  return rotateBallVector(
+    rotateBallVector(vector, [1, 0, 0], presentationTilt),
+    rollAxis,
+    rollPhase,
+  );
 }
 
 function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.save();
   ctx.translate(ball.x, ball.y);
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
-  ctx.shadowColor = "rgba(0, 0, 0, 0.32)";
-  ctx.shadowBlur = 6;
+  const radius = ball.radius;
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.38)";
+  ctx.shadowBlur = 7;
   ctx.beginPath();
-  ctx.ellipse(1.2, ball.radius * 0.46, ball.radius * 0.86, ball.radius * 0.43, 0, 0, Math.PI * 2);
+  ctx.ellipse(1.4, radius * 0.72, radius * 0.82, radius * 0.3, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowColor = "transparent";
 
   const shell = ctx.createRadialGradient(
-    -ball.radius * 0.42,
-    -ball.radius * 0.48,
-    ball.radius * 0.06,
-    ball.radius * 0.12,
-    ball.radius * 0.12,
-    ball.radius * 1.12,
+    -radius * 0.42,
+    -radius * 0.48,
+    radius * 0.04,
+    radius * 0.14,
+    radius * 0.16,
+    radius * 1.14,
   );
   shell.addColorStop(0, "#ffffff");
-  shell.addColorStop(0.52, "#f7f8f6");
-  shell.addColorStop(0.78, "#dfe4e5");
-  shell.addColorStop(1, "#929da3");
+  shell.addColorStop(0.38, "#fbfcfa");
+  shell.addColorStop(0.7, "#e8eceb");
+  shell.addColorStop(0.9, "#bbc4c4");
+  shell.addColorStop(1, "#717c82");
   ctx.fillStyle = shell;
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.fill();
 
-  // The panels travel inside a clipped sphere while the lighting remains fixed,
-  // which reads as a rolling football instead of a flat disc rotating in place.
+  // Project the twelve pentagons of a traditional 32-panel football onto the
+  // sphere. The projection rolls around the travel axis while the light stays put.
   ctx.save();
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius - 0.8, 0, Math.PI * 2);
+  ctx.arc(0, 0, radius - 0.55, 0, Math.PI * 2);
   ctx.clip();
-  ctx.rotate(ball.rollAngle ?? 0);
 
-  const phase = ball.rollPhase ?? 0;
-  const centerX = Math.sin(phase) * ball.radius * 0.34;
-  const centerY = Math.sin(phase * 0.55) * ball.radius * 0.12;
-  const centerScaleX = 0.58 + Math.abs(Math.cos(phase)) * 0.42;
-  const seamX = Math.sin(phase) * ball.radius * 0.58;
-  const seamWidth = Math.max(1.2, Math.abs(Math.cos(phase)) * ball.radius * 0.67);
+  const rollAngle = ball.rollAngle ?? 0;
+  const rollPhase = ball.rollPhase ?? 0;
+  const rollAxis: BallVector = [Math.sin(rollAngle), -Math.cos(rollAngle), 0];
+  const panelRadius = 0.285;
+  const seamRadius = 0.5;
+  const panels = FOOTBALL_PANEL_CENTERS.map((sourceCenter) => {
+    const reference: BallVector = Math.abs(sourceCenter[2]) > 0.86 ? [0, 1, 0] : [0, 0, 1];
+    const sourceTangent = normalizeBallVector(crossBallVectors(reference, sourceCenter));
+    const sourceBitangent = normalizeBallVector(crossBallVectors(sourceCenter, sourceTangent));
+    const center = orientFootballVector(sourceCenter, rollAxis, rollPhase);
+    const tangent = orientFootballVector(sourceTangent, rollAxis, rollPhase);
+    const bitangent = orientFootballVector(sourceBitangent, rollAxis, rollPhase);
+    return { center, tangent, bitangent };
+  }).filter(({ center }) => center[2] > -0.1)
+    .sort((a, b) => a.center[2] - b.center[2]);
 
-  ctx.strokeStyle = "rgba(78, 88, 94, 0.62)";
-  ctx.lineWidth = 0.75;
-  ctx.beginPath();
-  ctx.ellipse(seamX, 0, seamWidth, ball.radius * 0.98, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(
-    -seamX * 0.34,
-    0,
-    ball.radius * 0.94,
-    Math.max(1.1, seamWidth * 0.44),
-    0,
-    0,
-    Math.PI * 2,
-  );
-  ctx.stroke();
+  const panelPoint = (
+    center: BallVector,
+    tangent: BallVector,
+    bitangent: BallVector,
+    angle: number,
+    angularRadius: number,
+  ) => normalizeBallVector([
+    center[0] * Math.cos(angularRadius)
+      + (tangent[0] * Math.cos(angle) + bitangent[0] * Math.sin(angle)) * Math.sin(angularRadius),
+    center[1] * Math.cos(angularRadius)
+      + (tangent[1] * Math.cos(angle) + bitangent[1] * Math.sin(angle)) * Math.sin(angularRadius),
+    center[2] * Math.cos(angularRadius)
+      + (tangent[2] * Math.cos(angle) + bitangent[2] * Math.sin(angle)) * Math.sin(angularRadius),
+  ]);
 
-  const panels: Array<{ x: number; y: number; scale: number; depth: number }> = [];
-  for (let i = 0; i < 5; i += 1) {
-    const patchPhase = phase + (Math.PI * 2 * i) / 5;
-    const depth = Math.cos(patchPhase);
-    if (depth < -0.18) continue;
-    const laneY = [-0.58, 0.48, -0.08, 0.62, -0.38][i] * ball.radius;
-    const horizontalRadius = Math.sqrt(Math.max(0, ball.radius ** 2 - laneY ** 2));
-    const patchX = Math.sin(patchPhase) * horizontalRadius * 0.84;
-    const scale = 0.5 + Math.max(0, depth) * 0.5;
-    panels.push({ x: patchX, y: laneY, scale, depth });
+  // Short recessed seams imply the surrounding white hexagons without turning
+  // the small in-game ball into a noisy icon.
+  ctx.strokeStyle = "rgba(80, 90, 94, 0.62)";
+  ctx.lineWidth = 0.52;
+  ctx.lineCap = "round";
+  for (const { center, tangent, bitangent } of panels) {
+    if (center[2] < 0.05) continue;
+    for (let corner = 0; corner < 5; corner += 1) {
+      const angle = -Math.PI / 2 + (Math.PI * 2 * corner) / 5;
+      const start = panelPoint(center, tangent, bitangent, angle, panelRadius * 1.04);
+      const end = panelPoint(center, tangent, bitangent, angle, seamRadius);
+      if (start[2] < 0 || end[2] < 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(start[0] * radius, start[1] * radius);
+      ctx.lineTo(end[0] * radius, end[1] * radius);
+      ctx.stroke();
+    }
   }
 
-  ctx.strokeStyle = "rgba(73, 82, 87, 0.68)";
-  ctx.lineWidth = 0.8;
-  for (const panel of panels) {
+  for (const { center, tangent, bitangent } of panels) {
+    if (center[2] < -0.02) continue;
+    const vertices: BallVector[] = [];
+    for (let corner = 0; corner < 5; corner += 1) {
+      vertices.push(panelPoint(
+        center,
+        tangent,
+        bitangent,
+        -Math.PI / 2 + (Math.PI * 2 * corner) / 5,
+        panelRadius,
+      ));
+    }
+
     ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.lineTo(panel.x, panel.y);
-    ctx.stroke();
-  }
+    vertices.forEach((vertex, index) => {
+      const x = vertex[0] * radius;
+      const y = vertex[1] * radius;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
 
-  ctx.fillStyle = "#11181d";
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.78)";
-  ctx.lineWidth = 0.65;
-  traceBallPentagon(
-    ctx,
-    centerX,
-    centerY,
-    ball.radius * 0.3,
-    -Math.PI / 2 + phase * 0.08,
-    centerScaleX,
-  );
-  ctx.fill();
-  ctx.stroke();
-
-  for (const panel of panels) {
-    ctx.fillStyle = panel.depth > 0.3 ? "#0d1419" : "#263039";
-    traceBallPentagon(
-      ctx,
-      panel.x,
-      panel.y,
-      ball.radius * 0.27 * panel.scale,
-      -Math.PI / 2,
-      0.68 + Math.max(0, panel.depth) * 0.32,
+    const panelLight = clamp(center[2], 0, 1);
+    const panelFill = ctx.createLinearGradient(
+      center[0] * radius - 2.5,
+      center[1] * radius - 3,
+      center[0] * radius + 2.5,
+      center[1] * radius + 3,
     );
+    panelFill.addColorStop(0, panelLight > 0.55 ? "#263139" : "#323c41");
+    panelFill.addColorStop(0.48, panelLight > 0.55 ? "#0c1216" : "#192126");
+    panelFill.addColorStop(1, "#03070a");
+    ctx.fillStyle = panelFill;
     ctx.fill();
+    ctx.strokeStyle = "rgba(21, 27, 30, 0.92)";
+    ctx.lineWidth = 0.72;
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.lineWidth = 0.34;
+    ctx.beginPath();
+    ctx.moveTo(vertices[4][0] * radius, vertices[4][1] * radius);
+    ctx.lineTo(vertices[0][0] * radius, vertices[0][1] * radius);
+    ctx.lineTo(vertices[1][0] * radius, vertices[1][1] * radius);
     ctx.stroke();
   }
   ctx.restore();
 
   const edgeShade = ctx.createRadialGradient(
-    -ball.radius * 0.32,
-    -ball.radius * 0.38,
-    ball.radius * 0.38,
+    -radius * 0.32,
+    -radius * 0.38,
+    radius * 0.36,
     0,
     0,
-    ball.radius * 1.08,
+    radius * 1.08,
   );
-  edgeShade.addColorStop(0.5, "rgba(15, 25, 31, 0)");
-  edgeShade.addColorStop(0.82, "rgba(15, 25, 31, 0.08)");
-  edgeShade.addColorStop(1, "rgba(15, 25, 31, 0.34)");
+  edgeShade.addColorStop(0.48, "rgba(15, 25, 31, 0)");
+  edgeShade.addColorStop(0.78, "rgba(15, 25, 31, 0.08)");
+  edgeShade.addColorStop(0.93, "rgba(15, 25, 31, 0.25)");
+  edgeShade.addColorStop(1, "rgba(7, 13, 17, 0.48)");
   ctx.fillStyle = edgeShade;
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius - 0.45, 0, Math.PI * 2);
+  ctx.arc(0, 0, radius - 0.35, 0, Math.PI * 2);
   ctx.fill();
 
   const shine = ctx.createRadialGradient(
-    -ball.radius * 0.46,
-    -ball.radius * 0.52,
+    -radius * 0.43,
+    -radius * 0.5,
     0,
-    -ball.radius * 0.46,
-    -ball.radius * 0.52,
-    ball.radius * 0.44,
+    -radius * 0.43,
+    -radius * 0.5,
+    radius * 0.48,
   );
-  shine.addColorStop(0, "rgba(255,255,255,0.96)");
-  shine.addColorStop(0.35, "rgba(255,255,255,0.48)");
+  shine.addColorStop(0, "rgba(255, 255, 255, 0.92)");
+  shine.addColorStop(0.28, "rgba(255, 255, 255, 0.43)");
   shine.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = shine;
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius - 0.7, 0, Math.PI * 2);
+  ctx.arc(0, 0, radius - 0.55, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "rgba(7, 14, 18, 0.88)";
-  ctx.lineWidth = 1.25;
+  ctx.strokeStyle = "rgba(4, 10, 13, 0.9)";
+  ctx.lineWidth = 1.15;
   ctx.beginPath();
-  ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.46)";
-  ctx.lineWidth = 0.55;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.58)";
+  ctx.lineWidth = 0.62;
   ctx.beginPath();
-  ctx.arc(-0.35, -0.45, ball.radius - 1.35, Math.PI * 1.08, Math.PI * 1.78);
+  ctx.arc(-0.35, -0.45, radius - 1.25, Math.PI * 1.08, Math.PI * 1.78);
   ctx.stroke();
+
+  // A few tiny specular flecks give the synthetic leather a subtle grain.
+  ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
+  for (const [x, y] of [[-5.2, -1.9], [-3.8, 3.1], [1.5, -5.6], [4.6, -1.2]]) {
+    ctx.beginPath();
+    ctx.arc(x * (radius / 12), y * (radius / 12), 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -1416,6 +1485,7 @@ export default function FlickFootball({
   const [opponentReconnecting, setOpponentReconnecting] = useState(false);
   const [onlinePlayers, setOnlinePlayers] = useState<number | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [incomingChatPopup, setIncomingChatPopup] = useState<ChatMessage | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [unreadChat, setUnreadChat] = useState(0);
@@ -1437,6 +1507,15 @@ export default function FlickFootball({
       behavior: "smooth",
     });
   }, [chatMessages, chatOpen]);
+
+  useEffect(() => {
+    if (!incomingChatPopup) return;
+    const popupId = incomingChatPopup.id;
+    const timer = window.setTimeout(() => {
+      setIncomingChatPopup((current) => current?.id === popupId ? null : current);
+    }, 1_000);
+    return () => window.clearTimeout(timer);
+  }, [incomingChatPopup]);
 
   useEffect(() => {
     if (!chatOpen) return;
@@ -1629,6 +1708,7 @@ export default function FlickFootball({
         ));
         if (message.senderTeam !== activeMatch.myTeam && !chatOpenRef.current) {
           setUnreadChat((current) => Math.min(9, current + 1));
+          setIncomingChatPopup(message);
         }
       });
       socket.on("chat:history", ({
@@ -1680,6 +1760,7 @@ export default function FlickFootball({
         setReconnecting(false);
         setOpponentReconnecting(false);
         setChatMessages([]);
+        setIncomingChatPopup(null);
         setChatInput("");
         setChatOpen(false);
         setUnreadChat(0);
@@ -1841,6 +1922,7 @@ export default function FlickFootball({
   const openChat = () => {
     chatOpenRef.current = true;
     setChatOpen(true);
+    setIncomingChatPopup(null);
     setReactionPickerOpen(false);
     setUnreadChat(0);
   };
@@ -1848,6 +1930,7 @@ export default function FlickFootball({
   const resetMatchSocial = () => {
     chatOpenRef.current = false;
     setChatMessages([]);
+    setIncomingChatPopup(null);
     setChatInput("");
     setChatOpen(false);
     setUnreadChat(0);
@@ -2475,6 +2558,7 @@ export default function FlickFootball({
       setNetworkMessage("");
       chatOpenRef.current = false;
       setChatMessages([]);
+      setIncomingChatPopup(null);
       setChatInput("");
       setChatOpen(false);
       setUnreadChat(0);
@@ -2584,17 +2668,12 @@ export default function FlickFootball({
               ))}
             </div>
 
-            {!chatOpen && chatMessages.length > 0 ? (
+            {!chatOpen && incomingChatPopup ? (
               <div className={styles.tableChatFeed} aria-live="polite" aria-atomic="false">
-                {chatMessages.slice(-4).map((message) => {
-                  const mine = message.senderTeam === localTeam;
-                  return (
-                    <div className={styles.tableChatBubble} data-mine={mine} key={message.id}>
-                      <span>{mine ? "YOU" : message.senderName}</span>
-                      <p>{message.text}</p>
-                    </div>
-                  );
-                })}
+                <div className={styles.tableChatBubble} key={incomingChatPopup.id}>
+                  <span>{incomingChatPopup.senderName}</span>
+                  <p>{incomingChatPopup.text}</p>
+                </div>
               </div>
             ) : null}
 
