@@ -1,6 +1,6 @@
 .gameShell {
   position: relative;
-  width: min(100%, 470px);
+  width: min(100%, 470px, calc(58.333dvh - 67px));
   overflow: hidden;
   border: 0;
   border-radius: 0;
@@ -14,6 +14,17 @@
       #113920 128px
     );
   box-shadow: none;
+}
+
+.gameShell[data-lobby="true"] {
+  width: 100%;
+  height: 100dvh;
+}
+
+.gameShell[data-lobby="true"] > .scoreboard,
+.gameShell[data-lobby="true"] > .turnStrip,
+.gameShell[data-lobby="true"] > .pitchFrame {
+  display: none;
 }
 
 .scoreboard {
@@ -210,6 +221,7 @@
 .canvas {
   width: 100%;
   height: auto;
+  aspect-ratio: 7 / 12;
   display: block;
   touch-action: none;
   cursor: crosshair;
@@ -337,32 +349,24 @@
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 22px;
+  padding: clamp(24px, 6vw, 56px);
   overflow-y: auto;
-  background:
-    radial-gradient(circle at 50% 22%, rgba(72, 224, 170, 0.19), transparent 31%),
-    linear-gradient(rgba(5, 18, 25, 0.84), rgba(5, 12, 21, 0.98)),
-    repeating-linear-gradient(0deg, #117b58 0 50px, #0f704f 50px 100px);
-  backdrop-filter: blur(12px);
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .matchOverlay::before {
-  content: "";
-  position: absolute;
-  inset: 18px;
-  border: 1px solid rgba(223, 255, 241, 0.12);
-  border-radius: 22px;
-  pointer-events: none;
+  content: none;
 }
 
 .matchCard {
   position: relative;
-  width: 100%;
-  padding: 26px 24px 22px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 26px;
-  background: rgba(8, 19, 31, 0.94);
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.48);
+  width: min(100%, 400px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   text-align: center;
   animation: slideUp 260ms ease-out;
 }
@@ -373,10 +377,10 @@
   align-items: center;
   gap: 7px;
   margin: 0 auto 18px;
-  padding: 6px 10px;
-  border: 1px solid rgba(72, 224, 170, 0.18);
-  border-radius: 999px;
-  background: rgba(72, 224, 170, 0.07);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #78ebbe;
   font-size: 0.5rem;
   font-weight: 950;
@@ -391,36 +395,6 @@
   border-radius: 50%;
   background: #53e8ae;
   box-shadow: 0 0 0 4px rgba(83, 232, 174, 0.12), 0 0 12px rgba(83, 232, 174, 0.8);
-}
-
-.brandBall {
-  position: relative;
-  width: 82px;
-  height: 82px;
-  display: grid;
-  place-items: center;
-  margin: 0 auto 15px;
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  border-radius: 50%;
-  background: linear-gradient(135deg, #48e0aa 50%, #0b6f67 50%);
-  box-shadow: 0 0 0 8px rgba(72, 224, 170, 0.07), 0 16px 30px rgba(0, 0, 0, 0.38);
-  overflow: hidden;
-}
-
-.brandBall i {
-  position: absolute;
-  width: 92px;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.5);
-  transform: rotate(-35deg);
-}
-
-.brandBall b {
-  position: relative;
-  color: white;
-  font-size: 1.2rem;
-  font-style: italic;
-  font-weight: 950;
 }
 
 .eyebrow {
@@ -507,10 +481,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 13px 14px 13px 17px;
-  border-radius: 13px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #6ce9b8, #45dba5);
   color: #071710;
-  box-shadow: 0 12px 28px rgba(72, 224, 170, 0.17);
+  box-shadow: none;
   font-size: 0.7rem;
 }
 
@@ -532,18 +506,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.045);
+  padding: 11px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(5, 24, 17, 0.52);
   color: #dce9f4;
   cursor: pointer;
   font-family: inherit;
 }
 
 .roomButton:hover {
-  border-color: rgba(103, 227, 178, 0.32);
-  background: rgba(103, 227, 178, 0.075);
+  background: rgba(103, 227, 178, 0.14);
+  color: #fff;
 }
 
 .roomButton > span {
@@ -557,8 +531,8 @@
   height: 25px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: rgba(103, 227, 178, 0.11);
+  border-radius: 6px;
+  background: rgba(103, 227, 178, 0.16);
   color: #67e3b2;
   font-size: 0.9rem;
 }
@@ -580,9 +554,14 @@
 .practiceButton {
   margin-top: 7px;
   padding: 11px;
-  background: transparent;
-  color: #788ba0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d7e4ed;
   font-size: 0.53rem;
+}
+
+.practiceButton:hover {
+  background: rgba(255, 255, 255, 0.13);
 }
 
 .networkError {
@@ -616,11 +595,11 @@
   display: grid;
   place-items: center;
   margin: 10px auto 16px;
-  border: 1px solid rgba(103, 227, 178, 0.3);
-  border-radius: 19px;
-  background: linear-gradient(145deg, rgba(103, 227, 178, 0.14), rgba(103, 227, 178, 0.035));
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #67e3b2;
-  box-shadow: 0 13px 30px rgba(0, 0, 0, 0.25);
+  box-shadow: none;
   font-size: 1.55rem;
   font-weight: 950;
 }
@@ -832,7 +811,6 @@
 
 @media (max-width: 500px) {
   .gameShell {
-    width: 100%;
     border-radius: 0;
   }
 

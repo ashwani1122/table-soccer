@@ -1,7 +1,9 @@
 .page {
+  height: 100dvh;
   min-height: 100dvh;
   display: grid;
   place-items: center;
+  overflow: hidden;
   padding: 0;
   background:
     radial-gradient(circle at 50% 18%, rgba(105, 184, 91, 0.2), transparent 34rem),
@@ -67,13 +69,7 @@
 
 @media (min-width: 980px) {
   .page {
-    grid-template-columns: minmax(360px, 0.8fr) minmax(440px, 0.9fr);
-    gap: clamp(40px, 8vw, 130px);
-    padding: 42px 7vw;
-  }
-
-  .intro {
-    display: block;
-    justify-self: end;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
   }
 }

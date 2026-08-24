@@ -2281,7 +2281,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         : hud.message;
 
   return (
-    <section className={styles.gameShell} aria-label="FlickXI tabletop football game">
+    <section
+      className={styles.gameShell}
+      data-lobby={onlineStage !== "matched" && onlineStage !== "practice"}
+      aria-label="FlickXI tabletop football game"
+    >
       <header className={styles.scoreboard}>
         <button className={styles.iconButton} type="button" aria-label="Leave match" onClick={leaveMatch}>
           <span aria-hidden="true">←</span>
@@ -2366,7 +2370,6 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         <div className={styles.matchOverlay}>
           <div className={styles.matchCard}>
             <div className={styles.livePill}><span /> LIVE MULTIPLAYER</div>
-            <div className={styles.brandBall} aria-hidden="true"><i /><b>XI</b></div>
             <p className={styles.eyebrow}>FLICK FOOTBALL</p>
             <h1>Your pitch.<br />Your match.</h1>
             <p className={styles.matchCopy}>Find a rival now, or create a private room and invite one friend.</p>
