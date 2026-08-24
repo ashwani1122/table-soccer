@@ -5,6 +5,61 @@ export type CollisionBody = {
   mass: number;
 };
 
+export type MovingCollisionBody = CollisionBody & {
+  vx: number;
+  vy: number;
+};
+
+export function resolvePossessedBallCollision(
+  player: MovingCollisionBody,
+  carrier: MovingCollisionBody,
+  ball: MovingCollisionBody,
+  restitution: number,
+) {
+  let dx = ball.x - player.x;
+  let dy = ball.y - player.y;
+  let distance = Math.hypot(dx, dy);
+  const minimumDistance = player.radius + ball.radius;
+  if (distance >= minimumDistance) return false;
+
+  if (distance < 0.001) {
+    dx = 0.001;
+    dy = 0;
+    distance = 0.001;
+  }
+
+  const normalX = dx / distance;
+  const normalY = dy / distance;
+  const overlap = minimumDistance - distance;
+  const possessionMass = carrier.mass + ball.mass;
+  const totalMass = player.mass + possessionMass;
+  const playerShift = overlap * (possessionMass / totalMass);
+  const possessionShift = overlap * (player.mass / totalMass);
+
+  player.x -= normalX * playerShift;
+  player.y -= normalY * playerShift;
+  carrier.x += normalX * possessionShift;
+  carrier.y += normalY * possessionShift;
+  ball.x += normalX * possessionShift;
+  ball.y += normalY * possessionShift;
+
+  const relativeX = carrier.vx - player.vx;
+  const relativeY = carrier.vy - player.vy;
+  const closingSpeed = relativeX * normalX + relativeY * normalY;
+  if (closingSpeed < 0) {
+    const impulse = (-(1 + restitution) * closingSpeed) /
+      (1 / player.mass + 1 / possessionMass);
+    player.vx -= (impulse * normalX) / player.mass;
+    player.vy -= (impulse * normalY) / player.mass;
+    carrier.vx += (impulse * normalX) / possessionMass;
+    carrier.vy += (impulse * normalY) / possessionMass;
+  }
+
+  ball.vx = carrier.vx;
+  ball.vy = carrier.vy;
+  return true;
+}
+
 export function isWithinPassControl(
   player: Pick<CollisionBody, "x" | "y" | "radius">,
   ball: Pick<CollisionBody, "x" | "y" | "radius">,

@@ -5,6 +5,7 @@ import {
   advanceBallRoll,
   calculatePossessionImpact,
   isWithinPassControl,
+  resolvePossessedBallCollision,
 } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
 import styles from "./FlickFootball.module.css";
@@ -28,6 +29,7 @@ const PASS_ALIGN_DELAY = 1;
 const RESULT_HOME_DELAY = 3_000;
 const AIM_BROADCAST_MS = 60;
 const SMOKE_MIN_SPEED = 150;
+const COLLISION_SOLVER_PASSES = 4;
 
 type Team = "mint" | "coral";
 type Phase = "ready" | "moving" | "goal" | "finished";
@@ -980,7 +982,7 @@ function drawPlayer(
   ctx.shadowOffsetY = 5;
   ctx.fillStyle = "#05090d";
   ctx.beginPath();
-  ctx.arc(0, 1.5, body.radius + 2.6, 0, Math.PI * 2);
+  ctx.ellipse(0, 1.2, body.radius, body.radius - 1.2, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowColor = "transparent";
 
@@ -990,7 +992,7 @@ function drawPlayer(
     1,
     0,
     0,
-    body.radius + 2,
+    body.radius,
   );
   rim.addColorStop(0, "#f5fbfc");
   rim.addColorStop(0.32, "#9eabb0");
@@ -998,7 +1000,7 @@ function drawPlayer(
   rim.addColorStop(1, "#161d22");
   ctx.fillStyle = rim;
   ctx.beginPath();
-  ctx.arc(0, 0, body.radius + 2, 0, Math.PI * 2);
+  ctx.arc(0, 0, body.radius, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "rgba(4, 8, 12, 0.86)";
   ctx.lineWidth = 1.2;
@@ -2024,14 +2026,20 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         }
       }
 
-      for (let i = 0; i < game.bodies.length; i += 1) {
-        for (let j = i + 1; j < game.bodies.length; j += 1) {
+      for (let solverPass = 0; solverPass < COLLISION_SOLVER_PASSES; solverPass += 1) {
+        for (let i = 0; i < game.bodies.length; i += 1) {
+          for (let j = i + 1; j < game.bodies.length; j += 1) {
           const a = game.bodies[i];
           const b = game.bodies[j];
           if (!a || !b) continue;
           if (a.kind === "player" && b.kind === "player") {
             const impactSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
-            if (resolveCollision(a, b, 0.9) && impactSpeed > 40) {
+            const collided = resolveCollision(a, b, 0.9);
+            if (collided && game.carrierId && game.carrierOffset) {
+              const carrier = a.id === game.carrierId ? a : b.id === game.carrierId ? b : null;
+              if (carrier) lockBallToCarrier(carrier, ball, game.carrierOffset);
+            }
+            if (collided && solverPass === 0 && impactSpeed > 40) {
               sounds?.impact("disc", impactSpeed / MAX_SPEED);
             }
             continue;
@@ -2069,17 +2077,43 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
             continue;
           }
 
-          // Possession is persistent. Other moving discs may move the carrier,
-          // but only the carrier's next flick can detach the controlled ball.
-          if (game.carrierId || !touching) continue;
+          if (game.carrierId) {
+            const carrier = game.bodies.find((body) => body.id === game.carrierId);
+            if (!carrier || playerBody.id === carrier.id || !touching) continue;
+            const impactSpeed = Math.hypot(
+              playerBody.vx - carrier.vx,
+              playerBody.vy - carrier.vy,
+            );
+            const collided = resolvePossessedBallCollision(
+              playerBody,
+              carrier,
+              ballBody,
+              BALL_COLLISION_RESTITUTION,
+            );
+            if (collided && solverPass === 0 && impactSpeed > 35) {
+              sounds?.impact("ball", impactSpeed / MAX_SPEED);
+            }
+            continue;
+          }
+          if (!touching) continue;
 
           const impactSpeed = Math.hypot(
             playerBody.vx - ballBody.vx,
             playerBody.vy - ballBody.vy,
           );
-          if (resolveCollision(playerBody, ballBody, BALL_COLLISION_RESTITUTION) && impactSpeed > 35) {
+          if (
+            resolveCollision(playerBody, ballBody, BALL_COLLISION_RESTITUTION) &&
+            solverPass === 0 &&
+            impactSpeed > 35
+          ) {
             sounds?.impact("ball", impactSpeed / MAX_SPEED);
           }
+          }
+        }
+
+        if (game.carrierId && game.carrierOffset) {
+          const carrier = game.bodies.find((body) => body.id === game.carrierId);
+          if (carrier) lockBallToCarrier(carrier, ball, game.carrierOffset);
         }
       }
 
@@ -2107,13 +2141,18 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
               // The ball is the pivot: move the disc around it until the ball
               // sits between the disc and the opponent's goal.
               const controlDistance = carrier.radius + ball.radius + PASS_GAP;
-              carrier.x = ball.x - game.carrierOffset.x * controlDistance;
-              carrier.y = ball.y - game.carrierOffset.y * controlDistance;
+              const desiredCarrierX = ball.x - game.carrierOffset.x * controlDistance;
+              const desiredCarrierY = ball.y - game.carrierOffset.y * controlDistance;
+              carrier.x = desiredCarrierX;
+              carrier.y = desiredCarrierY;
               carrier.vx = 0;
               carrier.vy = 0;
               ball.vx = 0;
               ball.vy = 0;
               constrainPlayerToPitch(carrier);
+              ball.x += carrier.x - desiredCarrierX;
+              ball.y += carrier.y - desiredCarrierY;
+              lockBallToCarrier(carrier, ball, game.carrierOffset);
 
               if (aligned) game.carrierTargetOffset = null;
             } else {

@@ -5,6 +5,7 @@ import {
   advanceBallRoll,
   calculatePossessionImpact,
   isWithinPassControl,
+  resolvePossessedBallCollision,
 } from "../src/lib/game-physics.ts";
 import { registerGameSocket } from "../src/lib/realtime-game.ts";
 
@@ -39,6 +40,16 @@ const passPlayer = { x: 100, y: 100, radius: 19 };
 const passBall = { x: 138, y: 100, radius: 12 };
 assert.equal(isWithinPassControl(passPlayer, passBall, 7), true);
 assert.equal(isWithinPassControl(passPlayer, { ...passBall, x: 138.1 }, 7), false);
+
+const collidingPlayer = { x: 0, y: 0, vx: 120, vy: 0, radius: 19, mass: 2.6 };
+const carriedBall = { x: 30, y: 0, vx: 0, vy: 0, radius: 12, mass: 0.7 };
+const ballCarrier = { x: 68, y: 0, vx: 0, vy: 0, radius: 19, mass: 2.6 };
+const attachmentBefore = ballCarrier.x - carriedBall.x;
+assert.equal(resolvePossessedBallCollision(collidingPlayer, ballCarrier, carriedBall, 0.9), true);
+assert(Math.hypot(carriedBall.x - collidingPlayer.x, carriedBall.y - collidingPlayer.y) >= 31 - 1e-9);
+assert(Math.abs((ballCarrier.x - carriedBall.x) - attachmentBefore) < 1e-9);
+assert.equal(carriedBall.vx, ballCarrier.vx);
+assert(ballCarrier.vx > 0);
 
 class FakeSocket extends EventEmitter {
   readyState = 1;
