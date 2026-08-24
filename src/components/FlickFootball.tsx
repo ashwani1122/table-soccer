@@ -1457,7 +1457,6 @@ export default function FlickFootball({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chatListRef = useRef<HTMLDivElement>(null);
-  const chatSheetRef = useRef<HTMLElement>(null);
   const chatComposerRef = useRef<HTMLDivElement>(null);
   const chatOpenRef = useRef(false);
   const socketRef = useRef<RealtimeClient | null>(null);
@@ -1523,17 +1522,21 @@ export default function FlickFootball({
     const closeChatOnOutsidePress = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (chatSheetRef.current?.contains(target) || chatComposerRef.current?.contains(target)) return;
+      const clickedMessage = target instanceof Element
+        && Boolean(target.closest(`.${styles.chatMessage}`));
+      if (clickedMessage || chatComposerRef.current?.contains(target)) return;
 
       event.preventDefault();
       event.stopPropagation();
       chatOpenRef.current = false;
       setChatOpen(false);
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     };
     const closeChatOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       chatOpenRef.current = false;
       setChatOpen(false);
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     };
 
     document.addEventListener("pointerdown", closeChatOnOutsidePress, true);
@@ -2678,7 +2681,7 @@ export default function FlickFootball({
             ) : null}
 
             {chatOpen ? (
-              <aside className={styles.chatPanel} ref={chatSheetRef} aria-label="Match chat history">
+              <aside className={styles.chatPanel} aria-label="Match chat history">
                 <div className={styles.chatHeader}>
                   <div><span /> MATCH CHAT</div>
                   <small>TAP TABLE TO CLOSE</small>
