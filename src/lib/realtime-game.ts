@@ -17,6 +17,8 @@ type Player = QueueEntry & {
   team: Team;
   isBot: boolean;
   disconnectedAt: number | null;
+  lastChatAt?: number;
+  lastReactionAt?: number;
 };
 
 type RelayedShot = {
@@ -36,6 +38,15 @@ type BotAction = {
   shot: BotShot | null;
 };
 
+type RealtimeChatMessage = {
+  id: string;
+  matchId: string;
+  senderTeam: Team;
+  senderName: string;
+  text: string;
+  sentAt: number;
+};
+
 type MatchRoom = {
   id: string;
   activeTeam: Team;
@@ -48,6 +59,7 @@ type MatchRoom = {
   snapshotSequence: number;
   lastShot: RelayedShot | null;
   botAction: BotAction | null;
+  chatMessages: RealtimeChatMessage[];
   players: [Player, Player];
 };
 
@@ -115,6 +127,10 @@ const BOT_AIM_VARIANCE_MS = 450;
 const HEARTBEAT_MS = 10_000;
 const STREAM_BLOCK_MS = 5_000;
 const STREAM_MAX_LENGTH = 2_000;
+const CHAT_MAX_LENGTH = 160;
+const CHAT_COOLDOWN_MS = 650;
+const REACTION_COOLDOWN_MS = 500;
+const ALLOWED_REACTIONS = new Set(["⚽", "🔥", "👏", "😂", "😮", "💚"]);
 
 const globalForRealtime = globalThis as typeof globalThis & {
   __flickXiHub?: LocalHub;
@@ -187,6 +203,7 @@ function deserializeState(raw: string | null): GameState {
             ...room,
             players,
             botAction: room.botAction ?? null,
+            chatMessages: Array.isArray(room.chatMessages) ? room.chatMessages : [],
             rematchVotes: new Set(room.rematchVotes),
           },
         ];
@@ -308,6 +325,15 @@ function safeClientId(value: unknown, socketId: string) {
   return clean.length >= 12 ? clean : `legacy-${socketId}`;
 }
 
+function safeChatText(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, CHAT_MAX_LENGTH);
+}
+
 function cancelQueueBotTimer(clientId: string) {
   const timer = hub.queueBotTimers.get(clientId);
   if (timer) clearTimeout(timer);
@@ -399,6 +425,7 @@ function startMatch(
     snapshotSequence: 0,
     lastShot: null,
     botAction: null,
+    chatMessages: [],
     players: [
       { ...firstEntry, team: "mint", isBot: firstEntry.isBot === true, disconnectedAt: null },
       { ...secondEntry, team: "coral", isBot: secondEntry.isBot === true, disconnectedAt: null },
@@ -746,6 +773,10 @@ async function resumeSession(
     const info = matchInfo(room, player);
     outbound.push(direct(socketId, "session:resumed", { scope: "match" }));
     if (info) outbound.push(direct(socketId, "match:resumed", info));
+    outbound.push(direct(socketId, "chat:history", {
+      matchId: room.id,
+      messages: room.chatMessages ?? [],
+    }));
     const opponent = room.players.find((candidate) => candidate.clientId !== clientId);
     if (opponent) outbound.push(direct(opponent.socketId, "match:opponent-returned"));
     if (room.lastSnapshot) {
@@ -879,6 +910,47 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       removePrivateRoomForHost(state, socketId, outbound);
       outbound.push(direct(socketId, "room:cancelled"));
       return outbound;
+    case "chat:send": {
+      const room = getRoom(state, socketId);
+      if (!room) return outbound;
+      const player = room.players.find((candidate) => candidate.socketId === socketId);
+      if (!player || player.isBot || player.disconnectedAt !== null) return outbound;
+      const text = safeChatText(value.text);
+      const sentAt = Date.now();
+      if (!text || sentAt - (player.lastChatAt ?? 0) < CHAT_COOLDOWN_MS) return outbound;
+      player.lastChatAt = sentAt;
+      const message: RealtimeChatMessage = {
+        id: randomUUID(),
+        matchId: room.id,
+        senderTeam: player.team,
+        senderName: player.name,
+        text,
+        sentAt,
+      };
+      room.chatMessages = [...(room.chatMessages ?? []), message].slice(-40);
+      outbound.push(toMatch(room, "chat:message", message));
+      return outbound;
+    }
+    case "reaction:send": {
+      const room = getRoom(state, socketId);
+      if (!room) return outbound;
+      const player = room.players.find((candidate) => candidate.socketId === socketId);
+      const emoji = typeof value.emoji === "string" ? value.emoji : "";
+      const sentAt = Date.now();
+      if (!player || player.isBot || player.disconnectedAt !== null || !ALLOWED_REACTIONS.has(emoji)) {
+        return outbound;
+      }
+      if (sentAt - (player.lastReactionAt ?? 0) < REACTION_COOLDOWN_MS) return outbound;
+      player.lastReactionAt = sentAt;
+      outbound.push(toMatch(room, "reaction:show", {
+        id: randomUUID(),
+        matchId: room.id,
+        senderTeam: player.team,
+        emoji,
+        sentAt,
+      }));
+      return outbound;
+    }
     case "game:aim": {
       const room = getRoom(state, socketId);
       if (!room || room.shotInProgress || room.finished) return outbound;

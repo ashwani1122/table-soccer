@@ -197,6 +197,17 @@ assert.equal(secondMatch.payload.myTeam, "coral");
 assert.equal(firstMatch.payload.matchId, secondMatch.payload.matchId);
 assert.equal(await getOnlinePlayerCount(), 2);
 
+first.receive("chat:send", { text: "Good luck!" });
+await settle();
+assert.equal(first.latest("chat:message")?.payload?.text, "Good luck!");
+assert.equal(second.latest("chat:message")?.payload?.text, "Good luck!");
+assert.equal(second.latest("chat:message")?.payload?.senderTeam, "mint");
+
+second.receive("reaction:send", { emoji: "🔥" });
+await settle();
+assert.equal(first.latest("reaction:show")?.payload?.emoji, "🔥");
+assert.equal(second.latest("reaction:show")?.payload?.senderTeam, "coral");
+
 first.receive("game:aim", { bodyId: "mint-0", dirX: 0.6, dirY: -0.8, pull: 32 });
 await settle();
 assert.equal(second.latest("game:aim")?.payload?.bodyId, "mint-0");
@@ -234,6 +245,10 @@ assert.equal(first.latest("session:resumed")?.payload?.scope, "match");
 assert.equal(first.latest("match:resumed")?.payload?.matchId, firstMatch.payload.matchId);
 assert.equal(first.latest("match:resumed")?.payload?.myTeam, "mint");
 assert.equal(first.latest("game:sync")?.payload?.sequence, 1);
+assert.equal(
+  (first.latest("chat:history")?.payload?.messages as Array<Record<string, unknown>>)?.[0]?.text,
+  "Good luck!",
+);
 assert(second.latest("match:opponent-returned"));
 assert.equal(await getOnlinePlayerCount(), 2);
 
@@ -319,4 +334,4 @@ assert.equal(solo.latest("match:reset")?.payload?.sequence, 3);
 solo.receive("match:leave");
 await settle();
 
-console.log("Realtime matchmaking, bot fallback, bot turns, reconnect recovery, gameplay relay, rematch, and private-room checks passed.");
+console.log("Realtime matchmaking, chat, reactions, reconnect recovery, bot turns, gameplay relay, rematch, and private-room checks passed.");

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   advanceBallRoll,
   calculatePossessionImpact,
@@ -12,6 +13,8 @@ import {
 } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
 import styles from "./FlickFootball.module.css";
+
+const AuthIdentity = dynamic(() => import("./AuthIdentity"), { ssr: false });
 
 const WIDTH = 420;
 const HEIGHT = 720;
@@ -33,8 +36,9 @@ const BALL_WALL_RESTITUTION = 0.985;
 const BALL_COLLISION_RESTITUTION = 0.995;
 const BALL_FRICTION = 0.9;
 const PLAYER_FRICTION = 2.2;
+const REACTION_OPTIONS = ["⚽", "🔥", "👏", "😂", "😮", "💚"] as const;
 const POSSESSION_FRICTION = 1.95;
-const TURN_TIME = 100;
+const TURN_TIME = 10;
 const PASS_GAP = 7;
 const PASS_ALIGN_DELAY = 1;
 const PASS_MOMENTUM_TRANSFER = 0.5;
@@ -117,6 +121,24 @@ type MatchInfo = {
   opponent: { name: string; team: Team; isBot?: boolean };
   startsAt: number;
   roomCode?: string | null;
+};
+
+type ChatMessage = {
+  id: string;
+  matchId: string;
+  senderTeam: Team;
+  senderName: string;
+  text: string;
+  sentAt: number;
+};
+
+type GameReaction = {
+  id: string;
+  matchId: string;
+  senderTeam: Team;
+  emoji: string;
+  sentAt: number;
+  expiresAt: number;
 };
 
 type Shot = {
@@ -1277,8 +1299,16 @@ function normalizeRoomCode(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 }
 
-export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCode?: string }) {
+export default function FlickFootball({
+  initialRoomCode = "",
+  authEnabled = false,
+}: {
+  initialRoomCode?: string;
+  authEnabled?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chatListRef = useRef<HTMLDivElement>(null);
+  const chatOpenRef = useRef(false);
   const socketRef = useRef<RealtimeClient | null>(null);
   const soundRef = useRef<SoundEngine | null>(null);
   const kickoffTeamRef = useRef<Team>("mint");
@@ -1303,10 +1333,38 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const [reconnecting, setReconnecting] = useState(false);
   const [opponentReconnecting, setOpponentReconnecting] = useState(false);
   const [onlinePlayers, setOnlinePlayers] = useState<number | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [reactions, setReactions] = useState<GameReaction[]>([]);
 
   useEffect(() => {
     onlineStageRef.current = onlineStage;
   }, [onlineStage]);
+
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+  }, [chatOpen]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    chatListRef.current?.scrollTo({
+      top: chatListRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [chatMessages, chatOpen]);
+
+  useEffect(() => {
+    if (reactions.length === 0) return;
+    const nextExpiry = Math.min(...reactions.map((reaction) => reaction.expiresAt));
+    const timer = window.setTimeout(() => {
+      const now = Date.now();
+      setReactions((current) => current.filter((reaction) => reaction.expiresAt > now));
+    }, Math.max(0, nextExpiry - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [reactions]);
 
   useEffect(() => {
     if (!showRules) return;
@@ -1452,6 +1510,36 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           latestShotRef.current = null;
         }
       });
+      socket.on("chat:message", (message: ChatMessage) => {
+        const activeMatch = matchRef.current;
+        if (!activeMatch || message.matchId !== activeMatch.matchId || !message.id || !message.text) return;
+        setChatMessages((current) => (
+          current.some((item) => item.id === message.id)
+            ? current
+            : [...current.slice(-39), message]
+        ));
+        if (message.senderTeam !== activeMatch.myTeam && !chatOpenRef.current) {
+          setUnreadChat((current) => Math.min(9, current + 1));
+        }
+      });
+      socket.on("chat:history", ({
+        matchId,
+        messages,
+      }: {
+        matchId: string;
+        messages: ChatMessage[];
+      }) => {
+        if (matchRef.current?.matchId !== matchId || !Array.isArray(messages)) return;
+        setChatMessages(messages.slice(-40));
+      });
+      socket.on("reaction:show", (reaction: Omit<GameReaction, "expiresAt">) => {
+        const activeMatch = matchRef.current;
+        if (!activeMatch || reaction.matchId !== activeMatch.matchId || !reaction.id || !reaction.emoji) return;
+        setReactions((current) => [
+          ...current.filter((item) => item.senderTeam !== reaction.senderTeam),
+          { ...reaction, expiresAt: Date.now() + 2_200 },
+        ]);
+      });
       socket.on("room:created", ({ code }: { code: string }) => {
         connectionReadyRef.current = true;
         setReconnecting(false);
@@ -1482,6 +1570,12 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         setNetworkMessage("");
         setReconnecting(false);
         setOpponentReconnecting(false);
+        setChatMessages([]);
+        setChatInput("");
+        setChatOpen(false);
+        setUnreadChat(0);
+        setReactionPickerOpen(false);
+        setReactions([]);
         opponentConnectedRef.current = true;
         setOnlineStage("matched");
         setSession((value) => value + 1);
@@ -1618,6 +1712,38 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     }
   };
 
+  const sendChatMessage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = chatInput.replace(/\s+/g, " ").trim().slice(0, 160);
+    if (!text || onlineStage !== "matched" || !match || match.opponent.isBot) return;
+    socketRef.current?.emit("chat:send", { text });
+    setChatInput("");
+  };
+
+  const sendReaction = (emoji: string) => {
+    if (onlineStage !== "matched" || !match || match.opponent.isBot) return;
+    socketRef.current?.emit("reaction:send", { emoji });
+    setReactionPickerOpen(false);
+  };
+
+  const toggleChat = () => {
+    const nextOpen = !chatOpen;
+    chatOpenRef.current = nextOpen;
+    setChatOpen(nextOpen);
+    setReactionPickerOpen(false);
+    if (nextOpen) setUnreadChat(0);
+  };
+
+  const resetMatchSocial = () => {
+    chatOpenRef.current = false;
+    setChatMessages([]);
+    setChatInput("");
+    setChatOpen(false);
+    setUnreadChat(0);
+    setReactionPickerOpen(false);
+    setReactions([]);
+  };
+
   const cancelSearch = () => {
     socketRef.current?.emit("match:cancel");
     closeSocket();
@@ -1641,6 +1767,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setRoomCode("");
     setRoomPending(false);
     setNetworkMessage("");
+    resetMatchSocial();
     setOnlineStage("practice");
     setSession((value) => value + 1);
   };
@@ -1653,6 +1780,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     setRoomCode("");
     setRoomPending(false);
     setNetworkMessage("");
+    resetMatchSocial();
     setOnlineStage("menu");
     setSession((value) => value + 1);
   };
@@ -2234,6 +2362,13 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       setRoomCode("");
       setRoomPending(false);
       setNetworkMessage("");
+      chatOpenRef.current = false;
+      setChatMessages([]);
+      setChatInput("");
+      setChatOpen(false);
+      setUnreadChat(0);
+      setReactionPickerOpen(false);
+      setReactions([]);
       setOnlineStage("menu");
       setSession((value) => value + 1);
 
@@ -2251,6 +2386,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const mintName = nameForTeam("mint");
   const coralName = nameForTeam("coral");
   const localTeam: Team = onlineStage === "matched" && match ? match.myTeam : "mint";
+  const socialEnabled = onlineStage === "matched" && Boolean(match && !match.opponent.isBot);
   const localPlayerWon = hud.winner === localTeam;
   const showResultModal = (onlineStage === "matched" || onlineStage === "practice")
     && (hud.phase === "goal" || hud.phase === "finished")
@@ -2322,6 +2458,84 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
           className={styles.canvas}
           aria-label="Interactive football pitch. Drag an active team disc backwards and release to shoot."
         />
+        {socialEnabled ? (
+          <>
+            <div className={styles.reactionLayer} aria-live="polite" aria-atomic="false">
+              {reactions.map((reaction) => (
+                <span
+                  className={styles.reactionBurst}
+                  data-local={reaction.senderTeam === localTeam}
+                  key={reaction.id}
+                  aria-label={`${reaction.senderTeam === localTeam ? "You" : "Opponent"} reacted ${reaction.emoji}`}
+                >
+                  {reaction.emoji}
+                </span>
+              ))}
+            </div>
+
+            {reactionPickerOpen ? (
+              <div className={styles.reactionPicker} role="toolbar" aria-label="Send a quick reaction">
+                {REACTION_OPTIONS.map((emoji) => (
+                  <button type="button" key={emoji} onClick={() => sendReaction(emoji)} aria-label={`React with ${emoji}`}>
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {chatOpen ? (
+              <aside className={styles.chatPanel} aria-label="Match chat">
+                <div className={styles.chatHeader}>
+                  <div><span /> MATCH CHAT</div>
+                  <button type="button" onClick={toggleChat} aria-label="Close match chat">×</button>
+                </div>
+                <div className={styles.chatMessages} ref={chatListRef} aria-live="polite">
+                  {chatMessages.length === 0 ? (
+                    <p className={styles.emptyChat}>Say hello to your opponent.</p>
+                  ) : chatMessages.map((message) => {
+                    const mine = message.senderTeam === localTeam;
+                    return (
+                      <div className={styles.chatMessage} data-mine={mine} key={message.id}>
+                        <span>{mine ? "YOU" : message.senderName}</span>
+                        <p>{message.text}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <form className={styles.chatComposer} onSubmit={sendChatMessage}>
+                  <input
+                    value={chatInput}
+                    maxLength={160}
+                    autoComplete="off"
+                    placeholder="Type a message..."
+                    onChange={(event) => setChatInput(event.target.value)}
+                    aria-label="Chat message"
+                  />
+                  <button type="submit" disabled={!chatInput.trim()} aria-label="Send message">↑</button>
+                </form>
+              </aside>
+            ) : null}
+
+            <div className={styles.socialDock} aria-label="Match social controls">
+              <button type="button" onClick={toggleChat} data-active={chatOpen} aria-label="Open match chat">
+                <span aria-hidden="true">💬</span>
+                {unreadChat > 0 ? <b>{unreadChat}</b> : null}
+              </button>
+              <button
+                type="button"
+                data-active={reactionPickerOpen}
+                onClick={() => {
+                  setChatOpen(false);
+                  chatOpenRef.current = false;
+                  setReactionPickerOpen((current) => !current);
+                }}
+                aria-label="Open emoji reactions"
+              >
+                <span aria-hidden="true">😊</span>
+              </button>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {showResultModal ? (
@@ -2397,6 +2611,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
                 aria-label="Player name"
               />
             </label>
+            {authEnabled ? <AuthIdentity onIdentity={setPlayerName} /> : null}
             {networkMessage ? <p className={styles.networkError}>{networkMessage}</p> : null}
             <div className={styles.homeActions}>
               <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>

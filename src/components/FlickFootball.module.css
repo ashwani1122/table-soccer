@@ -235,6 +235,268 @@
   user-select: none;
 }
 
+.socialDock {
+  position: absolute;
+  z-index: 12;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 7px;
+}
+
+.socialDock button {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(230, 255, 244, 0.18);
+  border-radius: 50%;
+  background: rgba(6, 27, 19, 0.88);
+  color: #f4fff9;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  font-size: 1rem;
+  backdrop-filter: blur(9px);
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.socialDock button[data-active="true"] {
+  border-color: rgba(103, 227, 178, 0.58);
+  background: rgba(23, 95, 68, 0.95);
+}
+
+.socialDock button b {
+  position: absolute;
+  top: -4px;
+  right: -3px;
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border: 2px solid #0a251a;
+  border-radius: 999px;
+  background: #ff6d73;
+  color: #fff;
+  font-size: 0.48rem;
+  font-weight: 950;
+  animation: badgePop 180ms ease-out;
+}
+
+.reactionPicker {
+  position: absolute;
+  z-index: 13;
+  right: 10px;
+  bottom: 60px;
+  display: flex;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid rgba(230, 255, 244, 0.15);
+  border-radius: 999px;
+  background: rgba(5, 25, 17, 0.94);
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(12px);
+  animation: socialTrayIn 180ms ease-out;
+}
+
+.reactionPicker button {
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.08rem;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.reactionLayer {
+  position: absolute;
+  z-index: 11;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.reactionBurst {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(5, 25, 17, 0.78);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+  font-size: 1.8rem;
+  backdrop-filter: blur(8px);
+  animation: reactionFloat 2.2s ease-out both;
+}
+
+.reactionBurst[data-local="true"] {
+  right: 18%;
+  bottom: 20%;
+}
+
+.reactionBurst[data-local="false"] {
+  top: 18%;
+  left: 18%;
+}
+
+.chatPanel {
+  position: absolute;
+  z-index: 14;
+  right: 10px;
+  bottom: 60px;
+  width: min(calc(100% - 20px), 370px);
+  height: min(45%, 270px);
+  min-height: 215px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgba(221, 255, 239, 0.17);
+  border-radius: 17px;
+  background: rgba(5, 24, 17, 0.96);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(14px);
+  animation: chatPanelIn 200ms cubic-bezier(0.2, 0.85, 0.35, 1.08);
+}
+
+.chatHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 11px 8px 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: #dff9ec;
+  font-size: 0.53rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.chatHeader > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.chatHeader > div span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #67e3b2;
+  box-shadow: 0 0 9px rgba(103, 227, 178, 0.8);
+}
+
+.chatHeader button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  color: #b9cec3;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.chatMessages {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.emptyChat {
+  margin: auto;
+  color: #748d81;
+  font-size: 0.62rem;
+}
+
+.chatMessage {
+  max-width: 82%;
+  align-self: flex-start;
+}
+
+.chatMessage[data-mine="true"] {
+  align-self: flex-end;
+}
+
+.chatMessage > span {
+  display: block;
+  margin: 0 7px 3px;
+  color: #809a8e;
+  font-size: 0.42rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.chatMessage[data-mine="true"] > span {
+  text-align: right;
+}
+
+.chatMessage p {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 5px 12px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #edf8f2;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.chatMessage[data-mine="true"] p {
+  border-radius: 12px 5px 12px 12px;
+  background: rgba(72, 224, 170, 0.2);
+}
+
+.chatComposer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 7px;
+  padding: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.chatComposer input {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  font-size: 0.64rem;
+}
+
+.chatComposer input:focus {
+  border-color: rgba(103, 227, 178, 0.55);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chatComposer button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: #67e3b2;
+  color: #07150f;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.chatComposer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
 .statusBackdrop {
   position: absolute;
   z-index: 18;
@@ -600,6 +862,92 @@
   background: rgba(255, 255, 255, 0.075);
   box-shadow: 0 0 0 3px rgba(72, 224, 170, 0.09);
   transform: translateY(-1px);
+}
+
+.googleButton,
+.signedIdentity {
+  width: 100%;
+  min-height: 42px;
+  margin: -2px 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.googleButton {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  color: #e8f3ed;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.googleButton b {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: #fff;
+  color: #4285f4;
+  font-size: 0.75rem;
+  font-weight: 950;
+}
+
+.googleButton span {
+  font-size: 0.54rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.googleButton small {
+  color: #6f887c;
+  font-size: 0.42rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.signedIdentity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.signedIdentity > div:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.signedIdentity strong {
+  overflow: hidden;
+  color: #edf9f3;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signedIdentity span {
+  color: #67e3b2;
+  font-size: 0.41rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+}
+
+.authSkeleton {
+  width: 100%;
+  height: 42px;
+  margin: -2px 0 11px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: softPulse 1.2s ease-in-out infinite;
 }
 
 .homeActions {
@@ -995,6 +1343,23 @@
     color: #b5c7d6;
     transform: translateX(-2px);
   }
+
+  .googleButton:hover {
+    border-color: rgba(103, 227, 178, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-1px);
+  }
+
+  .socialDock button:hover {
+    border-color: rgba(103, 227, 178, 0.45);
+    background: rgba(16, 65, 46, 0.96);
+    transform: translateY(-2px);
+  }
+
+  .reactionPicker button:hover {
+    background: rgba(255, 255, 255, 0.09);
+    transform: translateY(-3px) scale(1.12);
+  }
 }
 
 .srOnly {
@@ -1048,6 +1413,28 @@
   35% { opacity: 1; transform: translateX(-4px); }
   70% { transform: translateX(3px); }
   100% { transform: translateX(0); }
+}
+
+@keyframes chatPanelIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes socialTrayIn {
+  from { opacity: 0; transform: translateY(7px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes reactionFloat {
+  0% { opacity: 0; transform: translateY(14px) scale(0.55) rotate(-8deg); }
+  18% { opacity: 1; transform: translateY(0) scale(1.08) rotate(3deg); }
+  72% { opacity: 1; transform: translateY(-18px) scale(1); }
+  100% { opacity: 0; transform: translateY(-42px) scale(0.86); }
+}
+
+@keyframes badgePop {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes spin {
