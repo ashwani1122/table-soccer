@@ -605,18 +605,6 @@ function resolveCollision(a: Body, b: Body, restitution = 0.88) {
   return true;
 }
 
-function drawRoundedRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number,
-) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, width, height, radius);
-}
-
 function drawCrowdStand(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -1227,31 +1215,6 @@ function drawGame(
     }
   }
   ctx.restore();
-
-  if (game.phase === "goal" || game.phase === "finished") {
-    ctx.fillStyle = "rgba(3, 10, 17, 0.42)";
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-    drawRoundedRect(ctx, 92, 307, 236, 105, 22);
-    ctx.fillStyle = "rgba(8, 22, 31, 0.92)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.stroke();
-    const localPlayerWon = game.winner === viewTeam;
-    ctx.fillStyle = game.phase === "finished"
-      ? localPlayerWon ? "#67e3b2" : "#ff7d84"
-      : "#ffdc66";
-    ctx.font = "900 34px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(
-      game.phase === "finished" ? localPlayerWon ? "YOU WON" : "YOU LOST" : "GOAL!",
-      210,
-      345,
-    );
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.font = "700 12px Arial";
-    ctx.fillText(game.message, 210, 382);
-  }
 }
 
 function resetPositions(game: Game, kickoffTeam: Team) {
@@ -1357,6 +1320,15 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   useEffect(() => {
     onlineStageRef.current = onlineStage;
   }, [onlineStage]);
+
+  useEffect(() => {
+    if (!showRules) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowRules(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showRules]);
 
   useEffect(() => {
     matchRef.current = match;
@@ -2272,6 +2244,11 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   };
   const mintName = nameForTeam("mint");
   const coralName = nameForTeam("coral");
+  const localTeam: Team = onlineStage === "matched" && match ? match.myTeam : "mint";
+  const localPlayerWon = hud.winner === localTeam;
+  const showResultModal = (onlineStage === "matched" || onlineStage === "practice")
+    && (hud.phase === "goal" || hud.phase === "finished")
+    && !reconnecting;
   const turnMessage = reconnecting
     ? "RECONNECTING TO MATCH..."
     : opponentReconnecting
@@ -2341,12 +2318,42 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
         />
       </div>
 
+      {showResultModal ? (
+        <div className={styles.statusBackdrop}>
+          <section
+            className={styles.statusCard}
+            data-tone={hud.phase === "goal" ? "goal" : localPlayerWon ? "won" : "lost"}
+            role="status"
+            aria-live="assertive"
+            aria-atomic="true"
+          >
+            <div className={styles.statusIcon} aria-hidden="true">
+              {hud.phase === "goal" ? "⚽" : localPlayerWon ? "★" : "×"}
+            </div>
+            <p className={styles.statusEyebrow}>
+              {hud.phase === "goal" ? "GOAL SCORED" : "MATCH COMPLETE"}
+            </p>
+            <h2 className={styles.statusTitle}>
+              {hud.phase === "goal" ? "Goal!" : localPlayerWon ? "You won" : "You lost"}
+            </h2>
+            <div className={styles.statusScore} aria-label={`Score ${hud.score.mint} to ${hud.score.coral}`}>
+              <span>{mintName}</span>
+              <strong>{hud.score.mint} - {hud.score.coral}</strong>
+              <span>{coralName}</span>
+            </div>
+            <p className={styles.statusCopy}>
+              {hud.phase === "goal" ? hud.message : "Returning to the lobby in a moment."}
+            </p>
+          </section>
+        </div>
+      ) : null}
+
       {showRules ? (
         <div className={styles.rulesBackdrop} role="presentation" onClick={() => setShowRules(false)}>
           <article className={styles.rulesCard} role="dialog" aria-modal="true" aria-labelledby="rules-title" onClick={(event) => event.stopPropagation()}>
             <div className={styles.rulesTopline}>
               <span>QUICK RULES</span>
-              <button type="button" onClick={() => setShowRules(false)} aria-label="Close rules">×</button>
+              <button type="button" autoFocus onClick={() => setShowRules(false)} aria-label="Close rules">×</button>
             </div>
             <h2 id="rules-title">Control the angle.<br />Own the chain.</h2>
             <ol>
@@ -2518,42 +2525,49 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       ) : null}
 
       {onlineStage === "matched" && reconnecting ? (
-        <div className={styles.matchOverlay}>
-          <div className={`${styles.matchCard} ${styles.searchCard}`}>
-            <div className={styles.disconnectIcon} aria-hidden="true">!</div>
-            <p className={styles.eyebrow}>CONNECTION INTERRUPTED</p>
-            <h2>Your match is saved</h2>
-            <p className={styles.matchCopy}>Automatic recovery is running. You can also reconnect immediately.</p>
-            <button className={styles.onlineButton} type="button" onClick={() => void reconnectMatch()}>
-              <span>RECONNECT NOW</span><b>GO</b>
-            </button>
-            <button className={styles.practiceButton} type="button" onClick={leaveMatch}>LEAVE MATCH</button>
-          </div>
+        <div className={styles.statusBackdrop}>
+          <section className={styles.statusCard} data-tone="warning" role="dialog" aria-modal="true" aria-labelledby="reconnect-title">
+            <div className={styles.statusIcon} aria-hidden="true">!</div>
+            <p className={styles.statusEyebrow}>CONNECTION INTERRUPTED</p>
+            <h2 className={styles.statusTitle} id="reconnect-title">Your match is saved</h2>
+            <p className={styles.statusCopy}>Automatic recovery is running. You can also reconnect immediately.</p>
+            <div className={styles.statusActions}>
+              <button className={styles.onlineButton} type="button" autoFocus onClick={() => void reconnectMatch()}>
+                <span>RECONNECT NOW</span><b>GO</b>
+              </button>
+              <button className={styles.practiceButton} type="button" onClick={leaveMatch}>LEAVE MATCH</button>
+            </div>
+          </section>
         </div>
       ) : null}
 
       {onlineStage === "disconnected" ? (
-        <div className={styles.matchOverlay}>
-          <div className={`${styles.matchCard} ${styles.searchCard}`}>
-            <div className={styles.disconnectIcon} aria-hidden="true">!</div>
-            <p className={styles.eyebrow}>CONNECTION LOST</p>
-            <h2>{match ? "Reconnect to your match" : "Match unavailable"}</h2>
-            <p className={styles.matchCopy}>{networkMessage || "This match is no longer active."}</p>
-            {match ? (
-              <button
-                className={styles.onlineButton}
-                type="button"
-                disabled={reconnecting}
-                onClick={() => void reconnectMatch()}
-              >
-                <span>{reconnecting ? "RECONNECTING..." : "RECONNECT MATCH"}</span><b>GO</b>
+        <div className={styles.statusBackdrop}>
+          <section className={styles.statusCard} data-tone="lost" role="dialog" aria-modal="true" aria-labelledby="disconnected-title">
+            <div className={styles.statusIcon} aria-hidden="true">!</div>
+            <p className={styles.statusEyebrow}>CONNECTION LOST</p>
+            <h2 className={styles.statusTitle} id="disconnected-title">
+              {match ? "Reconnect to your match" : "Match unavailable"}
+            </h2>
+            <p className={styles.statusCopy}>{networkMessage || "This match is no longer active."}</p>
+            <div className={styles.statusActions}>
+              {match ? (
+                <button
+                  className={styles.onlineButton}
+                  type="button"
+                  autoFocus
+                  disabled={reconnecting}
+                  onClick={() => void reconnectMatch()}
+                >
+                  <span>{reconnecting ? "RECONNECTING..." : "RECONNECT MATCH"}</span><b>GO</b>
+                </button>
+              ) : null}
+              <button className={styles.onlineButton} type="button" autoFocus={!match} onClick={() => void startMatchmaking()}>
+                <span>FIND NEW RIVAL</span><b>GO</b>
               </button>
-            ) : null}
-            <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
-              <span>FIND NEW RIVAL</span><b>GO</b>
-            </button>
-            <button className={styles.practiceButton} type="button" onClick={leaveMatch}>BACK TO LOBBY</button>
-          </div>
+              <button className={styles.practiceButton} type="button" onClick={leaveMatch}>BACK TO LOBBY</button>
+            </div>
+          </section>
         </div>
       ) : null}
 
