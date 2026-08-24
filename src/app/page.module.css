@@ -2,11 +2,16 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: 0;
   background:
-    radial-gradient(circle at 15% 10%, rgba(41, 211, 154, 0.12), transparent 28rem),
-    radial-gradient(circle at 86% 90%, rgba(84, 109, 255, 0.13), transparent 30rem),
-    #070d18;
+    radial-gradient(circle at 50% 18%, rgba(105, 184, 91, 0.2), transparent 34rem),
+    repeating-linear-gradient(
+      0deg,
+      #143f26 0,
+      #143f26 64px,
+      #113920 64px,
+      #113920 128px
+    );
   color: #f7fbff;
 }
 

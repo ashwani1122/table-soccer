@@ -2,10 +2,18 @@
   position: relative;
   width: min(100%, 470px);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 28px;
-  background: transparent;
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(103, 180, 91, 0.2), transparent 48%),
+    repeating-linear-gradient(
+      0deg,
+      #143f26 0,
+      #143f26 64px,
+      #113920 64px,
+      #113920 128px
+    );
+  box-shadow: none;
 }
 
 .scoreboard {
@@ -141,8 +149,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.055);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border: 0;
   background: transparent;
   color: #dce7f3;
   font-size: 0.54rem;
@@ -826,7 +833,7 @@
 @media (max-width: 500px) {
   .gameShell {
     width: 100%;
-    border-radius: 22px;
+    border-radius: 0;
   }
 
   .scoreboard {
