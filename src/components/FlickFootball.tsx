@@ -34,7 +34,7 @@ const MAX_SPEED = 960;
 const BALL_RADIUS = 12;
 const BALL_WALL_RESTITUTION = 0.985;
 const BALL_COLLISION_RESTITUTION = 0.995;
-const BALL_FRICTION = 0.9;
+const BALL_FRICTION = 1.05;
 const PLAYER_FRICTION = 2.2;
 const REACTION_OPTIONS = ["⚽", "🔥", "👏", "😂", "😮", "💚"] as const;
 const POSSESSION_FRICTION = 1.95;
@@ -2632,10 +2632,10 @@ export default function FlickFootball({
         <button
           className={styles.iconButton}
           type="button"
-          aria-label="Show game rules"
+          aria-label="Open match menu"
           onClick={() => setShowRules(true)}
         >
-          <span aria-hidden="true">?</span>
+          <span aria-hidden="true">⋯</span>
         </button>
       </header>
 
@@ -2782,8 +2782,8 @@ export default function FlickFootball({
         <div className={styles.rulesBackdrop} role="presentation" onClick={() => setShowRules(false)}>
           <article className={styles.rulesCard} role="dialog" aria-modal="true" aria-labelledby="rules-title" onClick={(event) => event.stopPropagation()}>
             <div className={styles.rulesTopline}>
-              <span>QUICK RULES</span>
-              <button type="button" autoFocus onClick={() => setShowRules(false)} aria-label="Close rules">×</button>
+              <span>MATCH MENU</span>
+              <button type="button" autoFocus onClick={() => setShowRules(false)} aria-label="Close match menu">×</button>
             </div>
             <h2 id="rules-title">Control the angle.<br />Own the chain.</h2>
             <ol>
@@ -2793,7 +2793,19 @@ export default function FlickFootball({
               <li><b>Shoot the ball</b><span>Flick through the gap—the contact angle controls the ball. The cyan line previews its path.</span></li>
               <li><b>Break possession</b><span>An opponent collision bounces normally and ends the passing chain.</span></li>
             </ol>
-            <button className={styles.playButton} type="button" onClick={() => setShowRules(false)}>LET’S PLAY</button>
+            <div className={styles.rulesActions}>
+              <button className={styles.playButton} type="button" onClick={() => setShowRules(false)}>CONTINUE PLAYING</button>
+              <button
+                className={styles.quitButton}
+                type="button"
+                onClick={() => {
+                  setShowRules(false);
+                  leaveMatch();
+                }}
+              >
+                QUIT MATCH
+              </button>
+            </div>
           </article>
         </div>
       ) : null}
