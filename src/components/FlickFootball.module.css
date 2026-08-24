@@ -1,6 +1,6 @@
 .gameShell {
   position: relative;
-  width: min(100%, 470px, calc(58.333dvh - 67px));
+  width: min(100%, 470px, calc(58.333dvh - 88px));
   overflow: hidden;
   border: 0;
   border-radius: 0;
@@ -23,7 +23,8 @@
 
 .gameShell[data-lobby="true"] > .scoreboard,
 .gameShell[data-lobby="true"] > .turnStrip,
-.gameShell[data-lobby="true"] > .pitchFrame {
+.gameShell[data-lobby="true"] > .pitchFrame,
+.gameShell[data-lobby="true"] > .matchChatBar {
   display: none;
 }
 
@@ -34,18 +35,18 @@
 }
 
 .scoreboard {
-  height: 76px;
+  height: 66px;
   display: grid;
-  grid-template-columns: 38px minmax(66px, 1fr) 96px minmax(66px, 1fr) 38px;
+  grid-template-columns: 34px minmax(62px, 1fr) 90px minmax(62px, 1fr) 34px;
   align-items: center;
   gap: 6px;
-  padding: 10px 10px 8px;
+  padding: 6px 9px 5px;
   background: transparent;
 }
 
 .iconButton {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -74,8 +75,8 @@
 
 .avatar {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 29px;
+  height: 29px;
   display: grid;
   place-items: center;
   border: 2px solid currentColor;
@@ -160,12 +161,12 @@
 }
 
 .turnStrip {
-  height: 36px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 14px;
+  padding: 0 11px;
   border: 0;
   background: transparent;
   color: #dce7f3;
@@ -235,60 +236,11 @@
   user-select: none;
 }
 
-.socialDock {
-  position: absolute;
-  z-index: 12;
-  right: 10px;
-  bottom: 10px;
-  display: flex;
-  gap: 7px;
-}
-
-.socialDock button {
-  position: relative;
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(230, 255, 244, 0.18);
-  border-radius: 50%;
-  background: rgba(6, 27, 19, 0.88);
-  color: #f4fff9;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  cursor: pointer;
-  font-size: 1rem;
-  backdrop-filter: blur(9px);
-  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
-}
-
-.socialDock button[data-active="true"] {
-  border-color: rgba(103, 227, 178, 0.58);
-  background: rgba(23, 95, 68, 0.95);
-}
-
-.socialDock button b {
-  position: absolute;
-  top: -4px;
-  right: -3px;
-  min-width: 17px;
-  height: 17px;
-  display: grid;
-  place-items: center;
-  padding: 0 4px;
-  border: 2px solid #0a251a;
-  border-radius: 999px;
-  background: #ff6d73;
-  color: #fff;
-  font-size: 0.48rem;
-  font-weight: 950;
-  animation: badgePop 180ms ease-out;
-}
-
 .reactionPicker {
   position: absolute;
-  z-index: 13;
-  right: 10px;
-  bottom: 60px;
+  z-index: 16;
+  right: 6px;
+  bottom: calc(100% + 7px);
   display: flex;
   gap: 4px;
   padding: 7px;
@@ -346,22 +298,81 @@
   left: 18%;
 }
 
+.tableChatFeed {
+  position: absolute;
+  z-index: 12;
+  right: 10px;
+  bottom: 11px;
+  left: 10px;
+  max-height: 134px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 5px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tableChatBubble {
+  max-width: 72%;
+  align-self: flex-start;
+  filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.24));
+  animation: tableMessageIn 180ms cubic-bezier(0.2, 0.85, 0.35, 1.08);
+}
+
+.tableChatBubble[data-mine="true"] {
+  align-self: flex-end;
+}
+
+.tableChatBubble span {
+  display: block;
+  margin: 0 6px 2px;
+  color: rgba(239, 255, 247, 0.76);
+  font-size: 0.39rem;
+  font-weight: 950;
+  letter-spacing: 0.09em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.tableChatBubble[data-mine="true"] span {
+  text-align: right;
+}
+
+.tableChatBubble p {
+  margin: 0;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px 12px 12px;
+  background: rgba(7, 26, 19, 0.82);
+  color: #f4fff9;
+  font-size: 0.59rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  backdrop-filter: blur(8px);
+}
+
+.tableChatBubble[data-mine="true"] p {
+  border-color: rgba(103, 227, 178, 0.25);
+  border-radius: 12px 5px 12px 12px;
+  background: rgba(24, 91, 65, 0.86);
+}
+
 .chatPanel {
   position: absolute;
   z-index: 14;
-  right: 10px;
-  bottom: 60px;
-  width: min(calc(100% - 20px), 370px);
-  height: min(45%, 270px);
-  min-height: 215px;
+  right: 8px;
+  bottom: 8px;
+  width: calc(100% - 16px);
+  height: min(44%, 260px);
+  min-height: 190px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid rgba(221, 255, 239, 0.17);
-  border-radius: 17px;
-  background: rgba(5, 24, 17, 0.96);
-  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.46);
-  backdrop-filter: blur(14px);
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: blur(3px);
   animation: chatPanelIn 200ms cubic-bezier(0.2, 0.85, 0.35, 1.08);
 }
 
@@ -369,8 +380,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 11px 8px 13px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 8px 9px 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   color: #dff9ec;
   font-size: 0.53rem;
   font-weight: 950;
@@ -391,15 +402,12 @@
   box-shadow: 0 0 9px rgba(103, 227, 178, 0.8);
 }
 
-.chatHeader button {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.07);
-  color: #b9cec3;
-  cursor: pointer;
-  font-size: 1rem;
+.chatHeader small {
+  color: rgba(225, 245, 235, 0.62);
+  font-size: 0.38rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
 .chatMessages {
@@ -455,44 +463,108 @@
   background: rgba(72, 224, 170, 0.2);
 }
 
-.chatComposer {
+.matchChatBar {
+  position: relative;
+  z-index: 15;
+  height: 54px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
-  gap: 7px;
-  padding: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 7px;
+  background: transparent;
 }
 
-.chatComposer input {
+.reactionToggle {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(230, 255, 244, 0.16);
+  border-radius: 12px;
+  background: rgba(8, 38, 27, 0.86);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.reactionToggle[data-active="true"] {
+  border-color: rgba(103, 227, 178, 0.58);
+  background: rgba(23, 95, 68, 0.94);
+}
+
+.inlineChatComposer {
   min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 6px;
+}
+
+.inlineChatField {
+  position: relative;
+  min-width: 0;
+}
+
+.inlineChatComposer input {
+  width: 100%;
+  height: 40px;
+  min-width: 0;
+  padding: 0 34px 0 12px;
+  border: 1px solid rgba(230, 255, 244, 0.16);
+  border-radius: 12px;
   outline: 0;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(7, 31, 22, 0.88);
   color: #fff;
   font: inherit;
-  font-size: 0.64rem;
+  font-size: 0.67rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
-.chatComposer input:focus {
+.inlineChatComposer input::placeholder {
+  color: #81978b;
+}
+
+.inlineChatComposer input:focus {
   border-color: rgba(103, 227, 178, 0.55);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(9, 43, 30, 0.94);
+  box-shadow: 0 0 0 3px rgba(103, 227, 178, 0.08), 0 6px 18px rgba(0, 0, 0, 0.2);
 }
 
-.chatComposer button {
-  width: 36px;
-  height: 36px;
+.inlineUnread {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ff6d73;
+  color: #fff;
+  font-size: 0.48rem;
+  font-weight: 950;
+  transform: translateY(-50%);
+  animation: badgePop 180ms ease-out;
+}
+
+.inlineChatComposer > button {
+  width: 38px;
+  height: 40px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #67e3b2;
   color: #07150f;
   cursor: pointer;
   font-size: 1rem;
   font-weight: 950;
+  box-shadow: 0 6px 18px rgba(39, 147, 105, 0.22);
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
-.chatComposer button:disabled {
+.inlineChatComposer > button:disabled {
   cursor: not-allowed;
   opacity: 0.38;
 }
@@ -1350,10 +1422,14 @@
     transform: translateY(-1px);
   }
 
-  .socialDock button:hover {
+  .reactionToggle:hover {
     border-color: rgba(103, 227, 178, 0.45);
     background: rgba(16, 65, 46, 0.96);
     transform: translateY(-2px);
+  }
+
+  .inlineChatComposer > button:not(:disabled):hover {
+    transform: translateY(-2px) scale(1.03);
   }
 
   .reactionPicker button:hover {
@@ -1420,6 +1496,11 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+@keyframes tableMessageIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @keyframes socialTrayIn {
   from { opacity: 0; transform: translateY(7px) scale(0.94); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -1451,7 +1532,7 @@
   }
 
   .scoreboard {
-    grid-template-columns: 35px minmax(58px, 1fr) 88px minmax(58px, 1fr) 35px;
+    grid-template-columns: 32px minmax(55px, 1fr) 82px minmax(55px, 1fr) 32px;
   }
 
   .playerName {

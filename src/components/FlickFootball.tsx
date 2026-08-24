@@ -1388,6 +1388,8 @@ export default function FlickFootball({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chatListRef = useRef<HTMLDivElement>(null);
+  const chatSheetRef = useRef<HTMLElement>(null);
+  const chatComposerRef = useRef<HTMLDivElement>(null);
   const chatOpenRef = useRef(false);
   const socketRef = useRef<RealtimeClient | null>(null);
   const soundRef = useRef<SoundEngine | null>(null);
@@ -1435,6 +1437,33 @@ export default function FlickFootball({
       behavior: "smooth",
     });
   }, [chatMessages, chatOpen]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+
+    const closeChatOnOutsidePress = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (chatSheetRef.current?.contains(target) || chatComposerRef.current?.contains(target)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      chatOpenRef.current = false;
+      setChatOpen(false);
+    };
+    const closeChatOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      chatOpenRef.current = false;
+      setChatOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeChatOnOutsidePress, true);
+    window.addEventListener("keydown", closeChatOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeChatOnOutsidePress, true);
+      window.removeEventListener("keydown", closeChatOnEscape);
+    };
+  }, [chatOpen]);
 
   useEffect(() => {
     if (reactions.length === 0) return;
@@ -1798,6 +1827,9 @@ export default function FlickFootball({
     if (!text || onlineStage !== "matched" || !match || match.opponent.isBot) return;
     socketRef.current?.emit("chat:send", { text });
     setChatInput("");
+    chatOpenRef.current = false;
+    setChatOpen(false);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
 
   const sendReaction = (emoji: string) => {
@@ -1806,12 +1838,11 @@ export default function FlickFootball({
     setReactionPickerOpen(false);
   };
 
-  const toggleChat = () => {
-    const nextOpen = !chatOpen;
-    chatOpenRef.current = nextOpen;
-    setChatOpen(nextOpen);
+  const openChat = () => {
+    chatOpenRef.current = true;
+    setChatOpen(true);
     setReactionPickerOpen(false);
-    if (nextOpen) setUnreadChat(0);
+    setUnreadChat(0);
   };
 
   const resetMatchSocial = () => {
@@ -2553,21 +2584,25 @@ export default function FlickFootball({
               ))}
             </div>
 
-            {reactionPickerOpen ? (
-              <div className={styles.reactionPicker} role="toolbar" aria-label="Send a quick reaction">
-                {REACTION_OPTIONS.map((emoji) => (
-                  <button type="button" key={emoji} onClick={() => sendReaction(emoji)} aria-label={`React with ${emoji}`}>
-                    {emoji}
-                  </button>
-                ))}
+            {!chatOpen && chatMessages.length > 0 ? (
+              <div className={styles.tableChatFeed} aria-live="polite" aria-atomic="false">
+                {chatMessages.slice(-4).map((message) => {
+                  const mine = message.senderTeam === localTeam;
+                  return (
+                    <div className={styles.tableChatBubble} data-mine={mine} key={message.id}>
+                      <span>{mine ? "YOU" : message.senderName}</span>
+                      <p>{message.text}</p>
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
 
             {chatOpen ? (
-              <aside className={styles.chatPanel} aria-label="Match chat">
+              <aside className={styles.chatPanel} ref={chatSheetRef} aria-label="Match chat history">
                 <div className={styles.chatHeader}>
                   <div><span /> MATCH CHAT</div>
-                  <button type="button" onClick={toggleChat} aria-label="Close match chat">×</button>
+                  <small>TAP TABLE TO CLOSE</small>
                 </div>
                 <div className={styles.chatMessages} ref={chatListRef} aria-live="polite">
                   {chatMessages.length === 0 ? (
@@ -2582,41 +2617,54 @@ export default function FlickFootball({
                     );
                   })}
                 </div>
-                <form className={styles.chatComposer} onSubmit={sendChatMessage}>
-                  <input
-                    value={chatInput}
-                    maxLength={160}
-                    autoComplete="off"
-                    placeholder="Type a message..."
-                    onChange={(event) => setChatInput(event.target.value)}
-                    aria-label="Chat message"
-                  />
-                  <button type="submit" disabled={!chatInput.trim()} aria-label="Send message">↑</button>
-                </form>
               </aside>
             ) : null}
-
-            <div className={styles.socialDock} aria-label="Match social controls">
-              <button type="button" onClick={toggleChat} data-active={chatOpen} aria-label="Open match chat">
-                <span aria-hidden="true">💬</span>
-                {unreadChat > 0 ? <b>{unreadChat}</b> : null}
-              </button>
-              <button
-                type="button"
-                data-active={reactionPickerOpen}
-                onClick={() => {
-                  setChatOpen(false);
-                  chatOpenRef.current = false;
-                  setReactionPickerOpen((current) => !current);
-                }}
-                aria-label="Open emoji reactions"
-              >
-                <span aria-hidden="true">😊</span>
-              </button>
-            </div>
           </>
         ) : null}
       </div>
+
+      {socialEnabled ? (
+        <div className={styles.matchChatBar} ref={chatComposerRef}>
+          {reactionPickerOpen ? (
+            <div className={styles.reactionPicker} role="toolbar" aria-label="Send a quick reaction">
+              {REACTION_OPTIONS.map((emoji) => (
+                <button type="button" key={emoji} onClick={() => sendReaction(emoji)} aria-label={`React with ${emoji}`}>
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <button
+            className={styles.reactionToggle}
+            type="button"
+            data-active={reactionPickerOpen}
+            onClick={() => {
+              chatOpenRef.current = false;
+              setChatOpen(false);
+              setReactionPickerOpen((current) => !current);
+            }}
+            aria-label="Open emoji reactions"
+          >
+            <span aria-hidden="true">😊</span>
+          </button>
+          <form className={styles.inlineChatComposer} onSubmit={sendChatMessage}>
+            <div className={styles.inlineChatField}>
+              <input
+                value={chatInput}
+                maxLength={160}
+                autoComplete="off"
+                placeholder="Message your opponent..."
+                onFocus={openChat}
+                onClick={openChat}
+                onChange={(event) => setChatInput(event.target.value)}
+                aria-label="Chat message"
+              />
+              {unreadChat > 0 ? <b className={styles.inlineUnread}>{unreadChat}</b> : null}
+            </div>
+            <button type="submit" disabled={!chatInput.trim()} aria-label="Send message">↑</button>
+          </form>
+        </div>
+      ) : null}
 
       {showResultModal ? (
         <div className={styles.statusBackdrop}>
