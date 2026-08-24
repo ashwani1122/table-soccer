@@ -528,6 +528,13 @@
   animation: statusPulse 1.8s ease-in-out infinite;
 }
 
+.livePill strong {
+  color: #f1fff9;
+  font-size: 0.64rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
 .eyebrow {
   margin: 0 0 7px;
   color: #66e3b1;

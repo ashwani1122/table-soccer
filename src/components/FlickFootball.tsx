@@ -1302,6 +1302,7 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
   const [roomCopied, setRoomCopied] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [opponentReconnecting, setOpponentReconnecting] = useState(false);
+  const [onlinePlayers, setOnlinePlayers] = useState<number | null>(null);
 
   useEffect(() => {
     onlineStageRef.current = onlineStage;
@@ -1324,6 +1325,45 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
     if (onlineStage !== "searching") return;
     const timer = window.setInterval(() => setSearchSeconds((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
+  }, [onlineStage]);
+
+  useEffect(() => {
+    if (onlineStage !== "menu") return;
+    let active = true;
+    let request: AbortController | null = null;
+
+    const refreshOnlinePlayers = async () => {
+      request?.abort();
+      const controller = new AbortController();
+      request = controller;
+      try {
+        const response = await fetch("/api/presence", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const data = await response.json() as { players?: unknown };
+        if (!active || typeof data.players !== "number" || !Number.isFinite(data.players)) return;
+        setOnlinePlayers(Math.max(0, Math.floor(data.players)));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        // Presence is optional; matchmaking remains available if this request fails.
+      }
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshOnlinePlayers();
+    };
+
+    void refreshOnlinePlayers();
+    const timer = window.setInterval(() => void refreshOnlinePlayers(), 8_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      request?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [onlineStage]);
 
   useEffect(() => {
@@ -2337,7 +2377,14 @@ export default function FlickFootball({ initialRoomCode = "" }: { initialRoomCod
       {onlineStage === "menu" ? (
         <div className={styles.matchOverlay}>
           <div className={styles.matchCard}>
-            <div className={styles.livePill}><span /> LIVE MULTIPLAYER</div>
+            <div className={styles.livePill} role="status" aria-live="polite">
+              <span />
+              {onlinePlayers === null ? (
+                <>CHECKING LIVE PLAYERS</>
+              ) : (
+                <><strong>{onlinePlayers}</strong> {onlinePlayers === 1 ? "PLAYER" : "PLAYERS"} PLAYING NOW</>
+              )}
+            </div>
             <p className={styles.eyebrow}>FLICK FOOTBALL</p>
             <h1>Your pitch.<br />Your match.</h1>
             <p className={styles.matchCopy}>Find a rival now, or create a private room and invite one friend.</p>

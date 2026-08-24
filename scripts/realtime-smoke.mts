@@ -10,7 +10,7 @@ import {
   resolveBallPlayerCollision,
   resolvePossessedBallCollision,
 } from "../src/lib/game-physics.ts";
-import { registerGameSocket } from "../src/lib/realtime-game.ts";
+import { getOnlinePlayerCount, registerGameSocket } from "../src/lib/realtime-game.ts";
 
 type Frame = { event: string; payload?: Record<string, unknown> };
 
@@ -195,6 +195,7 @@ assert(secondMatch?.payload);
 assert.equal(firstMatch.payload.myTeam, "mint");
 assert.equal(secondMatch.payload.myTeam, "coral");
 assert.equal(firstMatch.payload.matchId, secondMatch.payload.matchId);
+assert.equal(await getOnlinePlayerCount(), 2);
 
 first.receive("game:aim", { bodyId: "mint-0", dirX: 0.6, dirY: -0.8, pull: 32 });
 await settle();
@@ -219,6 +220,7 @@ assert.equal(second.latest("game:sync")?.payload?.sequence, 1);
 
 first.close();
 await settle();
+assert.equal(await getOnlinePlayerCount(), 1);
 assert(second.latest("match:opponent-reconnecting"));
 assert.equal(second.latest("match:opponent-reconnecting")?.payload?.graceMs, 90_000);
 second.receive("game:shoot", { bodyId: "coral-0", dirX: 0, dirY: 1, pull: 35 });
@@ -233,6 +235,7 @@ assert.equal(first.latest("match:resumed")?.payload?.matchId, firstMatch.payload
 assert.equal(first.latest("match:resumed")?.payload?.myTeam, "mint");
 assert.equal(first.latest("game:sync")?.payload?.sequence, 1);
 assert(second.latest("match:opponent-returned"));
+assert.equal(await getOnlinePlayerCount(), 2);
 
 second.receive("game:shoot", { bodyId: "coral-0", dirX: 0, dirY: 1, pull: 35 });
 await settle();
@@ -279,6 +282,7 @@ const botMatch = await waitForFrame(
     (frame.payload.opponent as Record<string, unknown>).isBot === true,
 );
 assert.equal((botMatch.payload?.opponent as Record<string, unknown>).name, "FlickBot");
+assert.equal(await getOnlinePlayerCount(), 1);
 
 solo.receive("game:shoot", { bodyId: "mint-0", dirX: 0, dirY: -1, pull: 40 });
 await settle();

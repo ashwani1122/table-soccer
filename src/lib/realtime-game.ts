@@ -1163,6 +1163,25 @@ function stopRedisInfrastructure() {
   }
 }
 
+export async function getOnlinePlayerCount() {
+  const state = realtimeRedis
+    ? deserializeState(await realtimeRedis.get(STATE_KEY))
+    : hub.memoryState;
+  const activeHumanSocketIds = new Set<string>();
+
+  for (const room of state.matches.values()) {
+    if (room.finished) continue;
+    for (const player of room.players) {
+      if (!player.isBot) activeHumanSocketIds.add(player.socketId);
+    }
+  }
+
+  const connected = await Promise.all(
+    [...activeHumanSocketIds].map((socketId) => connectionIsAlive(socketId)),
+  );
+  return connected.filter(Boolean).length;
+}
+
 async function unregisterGameSocket(socket: WebSocket) {
   const socketId = hub.socketIds.get(socket);
   if (!socketId) return;
