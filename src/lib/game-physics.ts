@@ -21,6 +21,36 @@ export type GoalArena = {
   bottomGoalBack: number;
 };
 
+export const FIXED_PHYSICS_STEP_SECONDS = 1 / 120;
+
+const FIXED_STEP_EPSILON = 1e-9;
+const DEFAULT_MAX_FRAME_CATCHUP = 1;
+const DEFAULT_MAX_STEPS_PER_FRAME = 120;
+
+export function advanceFixedPhysicsClock(
+  accumulator: number,
+  frameDelta: number,
+  fixedStep = FIXED_PHYSICS_STEP_SECONDS,
+  maxFrameCatchup = DEFAULT_MAX_FRAME_CATCHUP,
+  maxSteps = DEFAULT_MAX_STEPS_PER_FRAME,
+) {
+  const safeStep = Math.max(0.0001, fixedStep);
+  const elapsed = Math.min(
+    Math.max(0, Number.isFinite(frameDelta) ? frameDelta : 0),
+    Math.max(0, maxFrameCatchup),
+  );
+  let remaining = Math.max(0, Number.isFinite(accumulator) ? accumulator : 0) + elapsed;
+  const availableSteps = Math.floor((remaining + FIXED_STEP_EPSILON) / safeStep);
+  const steps = Math.min(Math.max(0, Math.floor(maxSteps)), availableSteps);
+  remaining = Math.max(0, remaining - steps * safeStep);
+
+  if (steps === maxSteps && remaining + FIXED_STEP_EPSILON >= safeStep) {
+    remaining %= safeStep;
+  }
+
+  return { accumulator: remaining, elapsed, steps };
+}
+
 export function capturePossessionMomentum(
   receiver: MovingCollisionBody,
   ball: MovingCollisionBody,

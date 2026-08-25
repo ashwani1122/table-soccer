@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
+  advanceFixedPhysicsClock,
   advanceBallRoll,
   calculatePossessionImpact,
   capturePossessionMomentum,
@@ -10,6 +11,7 @@ import {
   isWithinPassControl,
   resolveBallPlayerCollision,
   resolvePossessedBallCollision,
+  FIXED_PHYSICS_STEP_SECONDS,
 } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
 import styles from "./FlickFootball.module.css";
@@ -2002,6 +2004,7 @@ export default function FlickFootball({
       : "PULL BACK A DISC TO SHOOT";
     let frameId = 0;
     let previousTime = performance.now();
+    let physicsAccumulator = 0;
     let lastHudKey = "";
     let shotPending = false;
     let lastSequence = -1;
@@ -2076,6 +2079,8 @@ export default function FlickFootball({
       }
       body.vx = shot.dirX * launchSpeed;
       body.vy = shot.dirY * launchSpeed;
+      physicsAccumulator = 0;
+      previousTime = performance.now();
       game.lastShooterId = body.id;
 
       shotPending = false;
@@ -2210,6 +2215,8 @@ export default function FlickFootball({
     const onRemoteSync = ({ snapshot, sequence }: { snapshot: GameSnapshot; sequence: number }) => {
       if (sequence < lastSequence) return;
       lastSequence = sequence;
+      physicsAccumulator = 0;
+      previousTime = performance.now();
       shotPending = false;
       remoteAim = null;
       const previousPhase = game.phase;
@@ -2499,34 +2506,40 @@ export default function FlickFootball({
       }
     };
 
+    const updateTurnClock = (dt: number) => {
+      if (game.phase !== "ready" || game.drag) return;
+      game.turnTime -= dt;
+      const tick = Math.ceil(game.turnTime);
+      if (tick !== game.turnTick) {
+        game.turnTick = tick;
+        syncHud();
+      }
+      if (game.turnTime > 0) return;
+
+      const authorityTeam = game.activeTeam;
+      switchTurn(game, "TIME'S UP");
+      sounds?.turn();
+      syncHud();
+      if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
+    };
+
     const loop = (now: number) => {
-      const dt = Math.min((now - previousTime) / 1000, 0.025);
+      const fixedFrame = advanceFixedPhysicsClock(
+        physicsAccumulator,
+        (now - previousTime) / 1000,
+      );
       previousTime = now;
+      physicsAccumulator = fixedFrame.accumulator;
 
-      if (game.phase === "ready" && !game.drag) {
-        game.turnTime -= dt;
-        const tick = Math.ceil(game.turnTime);
-        if (tick !== game.turnTick) {
-          game.turnTick = tick;
-          syncHud();
-        }
-        if (game.turnTime <= 0) {
-          const authorityTeam = game.activeTeam;
-          switchTurn(game, "TIME'S UP");
-          sounds?.turn();
-          syncHud();
-          if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
-        }
+      for (let physicsStep = 0; physicsStep < fixedFrame.steps; physicsStep += 1) {
+        updateTurnClock(FIXED_PHYSICS_STEP_SECONDS);
+        updatePhysics(FIXED_PHYSICS_STEP_SECONDS, now);
       }
 
-      const physicsSteps = Math.max(1, Math.ceil(dt / 0.008));
-      for (let step = 0; step < physicsSteps; step += 1) {
-        updatePhysics(dt / physicsSteps, now);
-      }
       const ball = game.bodies.find((body) => body.kind === "ball");
-      if (ball) updateSmokeTrail(smoke, ball, dt);
+      if (ball) updateSmokeTrail(smoke, ball, fixedFrame.elapsed);
       drawGame(ctx, game, viewTeam, now, smoke, remoteAim);
-      updateAndDrawConfetti(ctx, confetti, dt);
+      updateAndDrawConfetti(ctx, confetti, fixedFrame.elapsed);
       frameId = requestAnimationFrame(loop);
     };
 

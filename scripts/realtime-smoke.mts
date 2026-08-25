@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import {
+  advanceFixedPhysicsClock,
   advanceBallRoll,
   calculatePossessionImpact,
   capturePossessionMomentum,
@@ -9,10 +10,26 @@ import {
   isWithinPassControl,
   resolveBallPlayerCollision,
   resolvePossessedBallCollision,
+  FIXED_PHYSICS_STEP_SECONDS,
 } from "../src/lib/game-physics.ts";
 import { getOnlinePlayerCount, registerGameSocket } from "../src/lib/realtime-game.ts";
 
 type Frame = { event: string; payload?: Record<string, unknown> };
+
+for (const framesPerSecond of [30, 60, 90, 120, 144, 165, 240]) {
+  let accumulator = 0;
+  let physicsSteps = 0;
+  for (let frame = 0; frame < framesPerSecond * 10; frame += 1) {
+    const fixedFrame = advanceFixedPhysicsClock(accumulator, 1 / framesPerSecond);
+    accumulator = fixedFrame.accumulator;
+    physicsSteps += fixedFrame.steps;
+  }
+  assert.equal(
+    physicsSteps,
+    10 / FIXED_PHYSICS_STEP_SECONDS,
+    `${framesPerSecond} Hz rendered a different number of physics steps`,
+  );
+}
 
 const glancingImpact = calculatePossessionImpact(
   { x: 100, y: 138, radius: 19, mass: 2.6 },
