@@ -58,7 +58,8 @@ const PASS_MOMENTUM_TRANSFER = 0.5;
 const BALL_TO_PLAYER_TRANSFER = 0.5;
 const RESULT_HOME_DELAY = 3_000;
 const AIM_BROADCAST_MS = 60;
-const SMOKE_MIN_SPEED = 150;
+const TURF_TRAIL_MIN_SPEED = 210;
+const VISUAL_ROLL_SCALE = 0.58;
 const COLLISION_SOLVER_PASSES = 4;
 
 type Phase = "ready" | "moving" | "goal" | "finished";
@@ -213,12 +214,14 @@ type ConfettiPiece = {
   color: string;
 };
 
-type SmokeParticle = {
+type TurfParticle = {
   x: number;
   y: number;
   vx: number;
   vy: number;
-  radius: number;
+  length: number;
+  rotation: number;
+  color: string;
   life: number;
   maxLife: number;
 };
@@ -415,49 +418,59 @@ function updateAndDrawConfetti(
   }
 }
 
-function updateSmokeTrail(particles: SmokeParticle[], ball: Body, dt: number) {
+function updateTurfTrail(particles: TurfParticle[], ball: Body, dt: number) {
   for (let index = particles.length - 1; index >= 0; index -= 1) {
     const particle = particles[index];
     if (!particle) continue;
     particle.life -= dt;
     particle.x += particle.vx * dt;
     particle.y += particle.vy * dt;
-    particle.vx *= Math.exp(-3.2 * dt);
-    particle.vy *= Math.exp(-3.2 * dt);
-    particle.radius += 8 * dt;
+    particle.vx *= Math.exp(-8 * dt);
+    particle.vy *= Math.exp(-8 * dt);
+    particle.rotation += 2.4 * dt;
     if (particle.life <= 0) particles.splice(index, 1);
   }
 
   const ballSpeed = speed(ball);
-  if (ballSpeed < SMOKE_MIN_SPEED) return;
-  const emissionChance = Math.min(1, dt * (18 + ballSpeed / 45));
+  if (ballSpeed < TURF_TRAIL_MIN_SPEED) return;
+  const emissionChance = Math.min(1, dt * (10 + ballSpeed / 85));
   if (Math.random() > emissionChance) return;
 
   const directionX = ball.vx / ballSpeed;
   const directionY = ball.vy / ballSpeed;
-  const sideways = (Math.random() - 0.5) * ball.radius * 0.9;
-  const maxLife = 0.32 + Math.random() * 0.24;
+  const sideways = (Math.random() - 0.5) * ball.radius * 1.15;
+  const sideDirection = Math.random() < 0.5 ? -1 : 1;
+  const maxLife = 0.16 + Math.random() * 0.16;
   particles.push({
-    x: ball.x - directionX * (ball.radius + 3) - directionY * sideways,
-    y: ball.y - directionY * (ball.radius + 3) + directionX * sideways,
-    vx: -directionX * (18 + Math.random() * 18),
-    vy: -directionY * (18 + Math.random() * 18) - 4,
-    radius: 2.4 + Math.random() * 2.4,
+    x: ball.x - directionX * (ball.radius * 0.75) - directionY * sideways,
+    y: ball.y - directionY * (ball.radius * 0.75) + directionX * sideways,
+    vx: -directionX * (8 + Math.random() * 10) - directionY * sideDirection * (6 + Math.random() * 10),
+    vy: -directionY * (8 + Math.random() * 10) + directionX * sideDirection * (6 + Math.random() * 10),
+    length: 1.8 + Math.random() * 2.4,
+    rotation: Math.atan2(directionY, directionX) + (Math.random() - 0.5) * 1.4,
+    color: Math.random() > 0.45 ? "#86b85f" : "#397d43",
     life: maxLife,
     maxLife,
   });
-  if (particles.length > 48) particles.splice(0, particles.length - 48);
+  if (particles.length > 28) particles.splice(0, particles.length - 28);
 }
 
-function drawSmokeTrail(ctx: CanvasRenderingContext2D, particles: SmokeParticle[]) {
+function drawTurfTrail(ctx: CanvasRenderingContext2D, particles: TurfParticle[]) {
   ctx.save();
   for (const particle of particles) {
     const progress = clamp(particle.life / particle.maxLife, 0, 1);
-    ctx.globalAlpha = progress * 0.28;
-    ctx.fillStyle = "#dce8ed";
+    ctx.save();
+    ctx.translate(particle.x, particle.y);
+    ctx.rotate(particle.rotation);
+    ctx.globalAlpha = Math.sin(progress * Math.PI) * 0.58;
+    ctx.strokeStyle = particle.color;
+    ctx.lineWidth = 0.85;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(-particle.length * 0.5, 0);
+    ctx.lineTo(particle.length * 0.5, 0);
+    ctx.stroke();
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -951,12 +964,27 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.translate(ball.x, ball.y);
 
   const radius = ball.radius;
+  const ballSpeed = speed(ball);
+  const speedRatio = clamp(ballSpeed / MAX_SPEED, 0, 1);
+  const directionX = ballSpeed > 0.01 ? ball.vx / ballSpeed : 0;
+  const directionY = ballSpeed > 0.01 ? ball.vy / ballSpeed : 0;
+  const contactTrail = speedRatio * 2.2;
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-  ctx.shadowColor = "rgba(0, 0, 0, 0.38)";
-  ctx.shadowBlur = 7;
+  // A tight, speed-reactive contact shadow keeps the ball planted on the turf.
+  // The previous soft shadow made the ball appear to hover and skate.
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.46 - speedRatio * 0.08})`;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
+  ctx.shadowBlur = 2.5 - speedRatio;
   ctx.beginPath();
-  ctx.ellipse(1.4, radius * 0.72, radius * 0.82, radius * 0.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(
+    0.8 - directionX * contactTrail,
+    radius * 0.66 - directionY * contactTrail,
+    radius * (0.72 + speedRatio * 0.08),
+    radius * (0.18 + (1 - speedRatio) * 0.035),
+    0,
+    0,
+    Math.PI * 2,
+  );
   ctx.fill();
   ctx.shadowColor = "transparent";
 
@@ -986,7 +1014,9 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.clip();
 
   const rollAngle = ball.rollAngle ?? 0;
-  const rollPhase = ball.rollPhase ?? 0;
+  // The physical no-slip phase advances very quickly at this scale. Slowing only
+  // its presentation prevents 60 Hz displays from aliasing it into a frozen slide.
+  const rollPhase = (ball.rollPhase ?? 0) * VISUAL_ROLL_SCALE;
   const rollAxis: BallVector = [Math.sin(rollAngle), -Math.cos(rollAngle), 0];
   const panelRadius = 0.285;
   const seamRadius = 0.5;
@@ -1080,6 +1110,30 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
     ctx.lineTo(vertices[0][0] * radius, vertices[0][1] * radius);
     ctx.lineTo(vertices[1][0] * radius, vertices[1][1] * radius);
     ctx.stroke();
+  }
+
+  // An asymmetric printed mark gives the eye a stable point to track while the
+  // otherwise repeating black-and-white panel pattern rolls.
+  const logoAnchor = orientFootballVector(
+    normalizeBallVector([0.42, -0.28, 0.86]),
+    rollAxis,
+    rollPhase,
+  );
+  if (logoAnchor[2] > 0.08) {
+    ctx.globalAlpha = clamp((logoAnchor[2] - 0.08) / 0.72, 0, 0.82);
+    ctx.fillStyle = "#287fc4";
+    ctx.beginPath();
+    ctx.ellipse(
+      logoAnchor[0] * radius,
+      logoAnchor[1] * radius,
+      1.25,
+      Math.max(0.45, logoAnchor[2] * 0.9),
+      Math.atan2(logoAnchor[1], logoAnchor[0]),
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 
@@ -1366,7 +1420,7 @@ function drawGame(
   game: Game,
   viewTeam: Team,
   animationTime: number,
-  smoke: SmokeParticle[],
+  turf: TurfParticle[],
   remoteAim: Drag | null,
   teamSetups: TeamSetups,
 ) {
@@ -1377,7 +1431,7 @@ function drawGame(
     ctx.rotate(Math.PI);
   }
   drawPitch(ctx);
-  drawSmokeTrail(ctx, smoke);
+  drawTurfTrail(ctx, turf);
   const ball = game.bodies.find((body) => body.kind === "ball");
   const visibleAim = game.drag ?? remoteAim;
   for (const body of game.bodies) {
@@ -2154,7 +2208,7 @@ export default function FlickFootball({
     let lastAimBroadcast = 0;
     let remoteAim: Drag | null = null;
     const confetti: ConfettiPiece[] = [];
-    const smoke: SmokeParticle[] = [];
+    const turf: TurfParticle[] = [];
     const cachedSync = match && latestSyncRef.current?.matchId === match.matchId
       ? latestSyncRef.current
       : null;
@@ -2682,8 +2736,8 @@ export default function FlickFootball({
       }
 
       const ball = game.bodies.find((body) => body.kind === "ball");
-      if (ball) updateSmokeTrail(smoke, ball, fixedFrame.elapsed);
-      drawGame(ctx, game, viewTeam, now, smoke, remoteAim, teamSetupsRef.current);
+      if (ball) updateTurfTrail(turf, ball, fixedFrame.elapsed);
+      drawGame(ctx, game, viewTeam, now, turf, remoteAim, teamSetupsRef.current);
       updateAndDrawConfetti(ctx, confetti, fixedFrame.elapsed);
       frameId = requestAnimationFrame(loop);
     };
