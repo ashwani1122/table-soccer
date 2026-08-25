@@ -1230,12 +1230,12 @@ function drawPlayer(
   ctx.translate(body.x, body.y);
   if (keepUpright) ctx.rotate(Math.PI);
 
-  ctx.shadowColor = "rgba(0, 0, 0, 0.48)";
-  ctx.shadowBlur = 9;
-  ctx.shadowOffsetY = 5;
-  ctx.fillStyle = "#05090d";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.34)";
+  ctx.shadowBlur = 7;
+  ctx.shadowOffsetY = 4;
+  ctx.fillStyle = "rgba(8, 19, 14, 0.28)";
   ctx.beginPath();
-  ctx.ellipse(0, 1.2, body.radius, body.radius - 1.2, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 2.5, body.radius * 0.88, body.radius * 0.72, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.shadowColor = "transparent";
 
@@ -1248,15 +1248,15 @@ function drawPlayer(
     body.radius,
   );
   rim.addColorStop(0, "#f5fbfc");
-  rim.addColorStop(0.32, "#9eabb0");
-  rim.addColorStop(0.7, "#465158");
-  rim.addColorStop(1, "#161d22");
+  rim.addColorStop(0.32, "#d2dbde");
+  rim.addColorStop(0.72, "#89979c");
+  rim.addColorStop(1, "#5f6e73");
   ctx.fillStyle = rim;
   ctx.beginPath();
   ctx.arc(0, 0, body.radius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(4, 8, 12, 0.86)";
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(233, 244, 246, 0.76)";
+  ctx.lineWidth = 0.9;
   ctx.stroke();
 
   if (body.team === activeTeam && !hideActiveRing) {
@@ -1286,12 +1286,21 @@ function drawPlayer(
 
   ctx.save();
   ctx.beginPath();
-  ctx.arc(0, 0, body.radius - 2.2, 0, Math.PI * 2);
+  const faceRadius = body.radius - 1.55;
+  ctx.arc(0, 0, faceRadius, 0, Math.PI * 2);
   ctx.clip();
-  ctx.fillStyle = meta.primary;
-  ctx.fillRect(-body.radius, -body.radius, body.radius, body.radius * 2);
-  ctx.fillStyle = meta.dark;
-  ctx.fillRect(0, -body.radius, body.radius, body.radius * 2);
+
+  // Enlarge the selected flag beyond the circular clipping area so it becomes
+  // the complete top surface instead of a small badge in the middle.
+  ctx.fillStyle = "#f7faf8";
+  ctx.fillRect(-body.radius, -body.radius, body.radius * 2, body.radius * 2);
+  ctx.save();
+  ctx.scale(1.08, 1.18);
+  ctx.font = `${body.radius * 2.55}px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(countryFlagEmoji(countryCode), 0, 0.4);
+  ctx.restore();
 
   const faceLight = ctx.createRadialGradient(
     -body.radius * 0.42,
@@ -1301,74 +1310,45 @@ function drawPlayer(
     0,
     body.radius,
   );
-  faceLight.addColorStop(0, "rgba(255,255,255,0.58)");
-  faceLight.addColorStop(0.4, "rgba(255,255,255,0.08)");
-  faceLight.addColorStop(0.72, "rgba(0,0,0,0.04)");
-  faceLight.addColorStop(1, "rgba(0,0,0,0.48)");
+  faceLight.addColorStop(0, "rgba(255,255,255,0.38)");
+  faceLight.addColorStop(0.42, "rgba(255,255,255,0.04)");
+  faceLight.addColorStop(0.78, "rgba(20,32,27,0.02)");
+  faceLight.addColorStop(1, "rgba(20,32,27,0.2)");
   ctx.fillStyle = faceLight;
   ctx.fillRect(-body.radius, -body.radius, body.radius * 2, body.radius * 2);
   ctx.restore();
 
-  ctx.strokeStyle = "rgba(255,255,255,0.62)";
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(246,252,250,0.72)";
+  ctx.lineWidth = 0.9;
   ctx.beginPath();
-  ctx.arc(0, 0, body.radius - 3.1, Math.PI * 1.08, Math.PI * 1.88);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(0,0,0,0.56)";
-  ctx.lineWidth = 2.4;
-  ctx.beginPath();
-  ctx.arc(0, 0.8, body.radius - 2.8, Math.PI * 0.12, Math.PI * 0.88);
+  ctx.arc(0, 0, faceRadius, 0, Math.PI * 2);
   ctx.stroke();
 
-  const facing = carrierFacing ?? { x: 0, y: body.team === "mint" ? -1 : 1 };
-  const viewDirection = keepUpright
-    ? { x: -facing.x, y: -facing.y }
-    : facing;
-  const sideX = -viewDirection.y * 4.5;
-  const sideY = viewDirection.x * 4.5;
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.strokeStyle = "rgba(255,255,255,0.46)";
+  ctx.lineWidth = 0.65;
   ctx.beginPath();
-  ctx.moveTo(
-    viewDirection.x * (body.radius - 3),
-    viewDirection.y * (body.radius - 3),
-  );
-  ctx.lineTo(
-    viewDirection.x * (body.radius - 10) + sideX,
-    viewDirection.y * (body.radius - 10) + sideY,
-  );
-  ctx.lineTo(
-    viewDirection.x * (body.radius - 10) - sideX,
-    viewDirection.y * (body.radius - 10) - sideY,
-  );
-  ctx.closePath();
-  ctx.fill();
+  ctx.arc(-0.35, -0.45, body.radius - 2.35, Math.PI * 1.08, Math.PI * 1.82);
+  ctx.stroke();
 
-  const badge = ctx.createRadialGradient(-3, -4, 1, 0, 0, 11);
-  badge.addColorStop(0, "rgba(255,255,255,0.34)");
-  badge.addColorStop(0.55, "rgba(12,24,31,0.74)");
-  badge.addColorStop(1, "rgba(3,8,12,0.94)");
-  ctx.fillStyle = badge;
-  ctx.beginPath();
-  ctx.arc(0, 0, 10, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.76)";
-  ctx.lineWidth = 1.1;
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(255,255,255,0.24)";
-  ctx.beginPath();
-  ctx.arc(0, 0, 7.4, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = "#fff";
-  ctx.shadowColor = "rgba(0,0,0,0.8)";
-  ctx.shadowBlur = 2;
-  ctx.font = "16px 'Segoe UI Emoji', 'Apple Color Emoji', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(countryFlagEmoji(countryCode), 0, 0.5);
-  ctx.font = "900 6px Arial";
-  ctx.fillStyle = "#fff";
-  ctx.fillText(String(body.number ?? ""), 7.2, 7.6);
-  ctx.shadowColor = "transparent";
+  // Keep a very small possession-facing marker without covering the flag face.
+  if (carrierFacing) {
+    const viewDirection = keepUpright
+      ? { x: -carrierFacing.x, y: -carrierFacing.y }
+      : carrierFacing;
+    ctx.fillStyle = "rgba(255,255,255,0.96)";
+    ctx.shadowColor = meta.primary;
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.arc(
+      viewDirection.x * (body.radius - 4),
+      viewDirection.y * (body.radius - 4),
+      1.8,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+  }
   ctx.restore();
 }
 
