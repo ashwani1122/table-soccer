@@ -50,6 +50,7 @@ const GOAL_ARENA = {
 const MAX_PULL = 92;
 const MAX_SPEED = 960;
 const BALL_RADIUS = 12;
+const PLAYER_PUCK_HEIGHT = 6;
 const BALL_WALL_RESTITUTION = 0.997;
 const BALL_COLLISION_RESTITUTION = 0.999;
 const BALL_FRICTION = 1.05;
@@ -1230,14 +1231,50 @@ function drawPlayer(
   ctx.translate(body.x, body.y);
   if (keepUpright) ctx.rotate(Math.PI);
 
-  ctx.shadowColor = "rgba(0, 0, 0, 0.34)";
-  ctx.shadowBlur = 7;
-  ctx.shadowOffsetY = 4;
-  ctx.fillStyle = "rgba(8, 19, 14, 0.28)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.42)";
+  ctx.shadowBlur = 9;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = "rgba(8, 19, 14, 0.3)";
   ctx.beginPath();
-  ctx.ellipse(0, 2.5, body.radius * 0.88, body.radius * 0.72, 0, 0, Math.PI * 2);
+  ctx.ellipse(
+    0,
+    PLAYER_PUCK_HEIGHT + 2.5,
+    body.radius * 0.88,
+    body.radius * 0.48,
+    0,
+    0,
+    Math.PI * 2,
+  );
   ctx.fill();
   ctx.shadowColor = "transparent";
+
+  // Build a visible metallic side wall beneath the flag face. Drawing the lower
+  // layers first leaves a shaded crescent below the top circle and makes the puck
+  // read as physically raised without changing its collision radius.
+  for (let layer = PLAYER_PUCK_HEIGHT; layer >= 1; layer -= 1) {
+    const depth = layer / PLAYER_PUCK_HEIGHT;
+    const red = Math.round(167 - depth * 76);
+    const green = Math.round(181 - depth * 70);
+    const blue = Math.round(186 - depth * 66);
+    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+    ctx.beginPath();
+    ctx.ellipse(0, layer, body.radius, body.radius - 1.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "rgba(229, 240, 242, 0.34)";
+  ctx.lineWidth = 0.75;
+  ctx.beginPath();
+  ctx.ellipse(
+    0,
+    PLAYER_PUCK_HEIGHT,
+    body.radius - 0.5,
+    body.radius - 1.7,
+    0,
+    0.08 * Math.PI,
+    0.92 * Math.PI,
+  );
+  ctx.stroke();
 
   const rim = ctx.createRadialGradient(
     -body.radius * 0.42,
