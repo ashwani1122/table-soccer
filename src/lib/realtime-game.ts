@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type Redis from "ioredis";
 import type { WebSocket } from "ws";
+import {
+  BOT_PLAYER_SETUP,
+  isCountryCode,
+  isFormationId,
+  type FormationId,
+  type PlayerSetup,
+  type Team,
+} from "./match-setup.ts";
 import { fieldsToObject, realtimeRedis } from "./realtime-redis.ts";
-
-type Team = "mint" | "coral";
 
 type QueueEntry = {
   socketId: string;
@@ -17,6 +23,8 @@ type Player = QueueEntry & {
   team: Team;
   isBot: boolean;
   disconnectedAt: number | null;
+  countryCode?: string;
+  formation?: FormationId;
   lastChatAt?: number;
   lastReactionAt?: number;
 };
@@ -389,7 +397,37 @@ function cleanRoomCode(value: unknown) {
 }
 
 function publicPlayer(player: Player) {
-  return { name: player.name, team: player.team, isBot: player.isBot };
+  return {
+    name: player.name,
+    team: player.team,
+    isBot: player.isBot,
+    countryCode: player.countryCode,
+    formation: player.formation,
+  };
+}
+
+function playerSetup(player: Player): PlayerSetup | null {
+  if (!isCountryCode(player.countryCode) || !isFormationId(player.formation)) return null;
+  return { countryCode: player.countryCode.toUpperCase(), formation: player.formation };
+}
+
+function roomSetupPayload(room: MatchRoom) {
+  const mint = room.players.find((player) => player.team === "mint");
+  const coral = room.players.find((player) => player.team === "coral");
+  const players = {
+    mint: mint ? playerSetup(mint) : null,
+    coral: coral ? playerSetup(coral) : null,
+  };
+  return {
+    matchId: room.id,
+    players,
+    ready: players.mint !== null && players.coral !== null,
+    startsAt: players.mint !== null && players.coral !== null ? Date.now() + 350 : null,
+  };
+}
+
+function roomSetupReady(room: MatchRoom) {
+  return room.players.every((player) => playerSetup(player) !== null);
 }
 
 function matchInfo(room: MatchRoom, player: Player) {
@@ -401,6 +439,7 @@ function matchInfo(room: MatchRoom, player: Player) {
     player: publicPlayer(player),
     opponent: publicPlayer(opponent),
     startsAt: Date.now() + 250,
+    setupReady: roomSetupReady(room),
     roomCode: room.privateCode,
   };
 }
@@ -426,10 +465,13 @@ function startMatch(
     lastShot: null,
     botAction: null,
     chatMessages: [],
-    players: [
-      { ...firstEntry, team: "mint", isBot: firstEntry.isBot === true, disconnectedAt: null },
-      { ...secondEntry, team: "coral", isBot: secondEntry.isBot === true, disconnectedAt: null },
-    ],
+    players: [firstEntry, secondEntry].map((entry, index) => ({
+      ...entry,
+      team: index === 0 ? "mint" : "coral",
+      isBot: entry.isBot === true,
+      disconnectedAt: null,
+      ...(entry.isBot ? BOT_PLAYER_SETUP : {}),
+    })) as [Player, Player],
   };
 
   state.matches.set(matchId, room);
@@ -571,7 +613,13 @@ function scheduleBotWake(matchId: string, dueAt: number) {
 }
 
 function prepareBotTurn(room: MatchRoom) {
-  if (!botPlayerForTurn(room) || room.finished || room.shotInProgress || room.botAction) return;
+  if (
+    !roomSetupReady(room) ||
+    !botPlayerForTurn(room) ||
+    room.finished ||
+    room.shotInProgress ||
+    room.botAction
+  ) return;
   room.botAction = {
     stage: "thinking",
     dueAt: Date.now() + BOT_THINK_MIN_MS + Math.random() * BOT_THINK_VARIANCE_MS,
@@ -773,6 +821,7 @@ async function resumeSession(
     const info = matchInfo(room, player);
     outbound.push(direct(socketId, "session:resumed", { scope: "match" }));
     if (info) outbound.push(direct(socketId, "match:resumed", info));
+    outbound.push(direct(socketId, "match:setup", roomSetupPayload(room)));
     outbound.push(direct(socketId, "chat:history", {
       matchId: room.id,
       messages: room.chatMessages ?? [],
@@ -910,6 +959,27 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       removePrivateRoomForHost(state, socketId, outbound);
       outbound.push(direct(socketId, "room:cancelled"));
       return outbound;
+    case "match:configure": {
+      const room = getRoom(state, socketId);
+      if (!room || room.shotInProgress || room.finished) return outbound;
+      const player = room.players.find((candidate) => candidate.socketId === socketId);
+      if (!player || player.isBot) return outbound;
+      const countryCode = typeof value.countryCode === "string"
+        ? value.countryCode.toUpperCase()
+        : value.countryCode;
+      if (!isCountryCode(countryCode) || !isFormationId(value.formation)) {
+        outbound.push(direct(socketId, "game:error", {
+          message: "Choose a valid country and formation.",
+        }));
+        return outbound;
+      }
+      player.countryCode = countryCode;
+      player.formation = value.formation;
+      const setup = roomSetupPayload(room);
+      outbound.push(toMatch(room, "match:setup", setup));
+      if (setup.ready) prepareBotTurn(room);
+      return outbound;
+    }
     case "chat:send": {
       const room = getRoom(state, socketId);
       if (!room) return outbound;
@@ -953,7 +1023,7 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
     }
     case "game:aim": {
       const room = getRoom(state, socketId);
-      if (!room || room.shotInProgress || room.finished) return outbound;
+      if (!room || !roomSetupReady(room) || room.shotInProgress || room.finished) return outbound;
       if (room.players.some((player) => player.disconnectedAt !== null)) return outbound;
       const player = room.players.find((candidate) => candidate.socketId === socketId);
       if (!player || player.team !== room.activeTeam) return outbound;
@@ -970,7 +1040,7 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
     }
     case "game:aim-clear": {
       const room = getRoom(state, socketId);
-      if (!room) return outbound;
+      if (!room || !roomSetupReady(room)) return outbound;
       const player = room.players.find((candidate) => candidate.socketId === socketId);
       if (!player || player.team !== room.activeTeam) return outbound;
       const opponent = room.players.find((candidate) => candidate.socketId !== socketId);
@@ -980,6 +1050,12 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
     case "game:shoot": {
       const room = getRoom(state, socketId);
       if (!room || room.shotInProgress || room.finished) return outbound;
+      if (!roomSetupReady(room)) {
+        outbound.push(direct(socketId, "game:error", {
+          message: "Waiting for both players to finish team setup.",
+        }));
+        return outbound;
+      }
       if (room.players.some((player) => player.disconnectedAt !== null)) {
         outbound.push(direct(socketId, "game:error", {
           message: "Waiting for your opponent to reconnect.",

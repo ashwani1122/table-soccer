@@ -214,6 +214,42 @@ assert.equal(secondMatch.payload.myTeam, "coral");
 assert.equal(firstMatch.payload.matchId, secondMatch.payload.matchId);
 assert.equal(await getOnlinePlayerCount(), 2);
 
+first.receive("game:shoot", { bodyId: "mint-0", dirX: 0, dirY: -1, pull: 40 });
+await settle();
+assert.equal(
+  first.latest("game:error")?.payload?.message,
+  "Waiting for both players to finish team setup.",
+);
+assert.equal(first.latest("game:shot"), undefined);
+
+first.receive("match:configure", {
+  countryCode: "IN",
+  formation: "attacking-1-3-2",
+});
+await settle();
+assert.equal(first.latest("match:setup")?.payload?.ready, false);
+assert.deepEqual(
+  (first.latest("match:setup")?.payload?.players as Record<string, unknown>)?.mint,
+  {
+  countryCode: "IN",
+  formation: "attacking-1-3-2",
+  },
+);
+second.receive("match:configure", {
+  countryCode: "BR",
+  formation: "defensive-1-4-1",
+});
+await settle();
+assert.equal(first.latest("match:setup")?.payload?.ready, true);
+assert.equal(second.latest("match:setup")?.payload?.ready, true);
+assert.deepEqual(
+  (second.latest("match:setup")?.payload?.players as Record<string, unknown>)?.coral,
+  {
+  countryCode: "BR",
+  formation: "defensive-1-4-1",
+  },
+);
+
 first.receive("chat:send", { text: "Good luck!" });
 await settle();
 assert.equal(first.latest("chat:message")?.payload?.text, "Good luck!");
@@ -261,6 +297,15 @@ await settle();
 assert.equal(first.latest("session:resumed")?.payload?.scope, "match");
 assert.equal(first.latest("match:resumed")?.payload?.matchId, firstMatch.payload.matchId);
 assert.equal(first.latest("match:resumed")?.payload?.myTeam, "mint");
+assert.equal(
+  (first.latest("match:resumed")?.payload?.player as Record<string, unknown>)?.countryCode,
+  "IN",
+);
+assert.equal(
+  (first.latest("match:resumed")?.payload?.player as Record<string, unknown>)?.formation,
+  "attacking-1-3-2",
+);
+assert.equal(first.latest("match:setup")?.payload?.ready, true);
 assert.equal(first.latest("game:sync")?.payload?.sequence, 1);
 assert.equal(
   (first.latest("chat:history")?.payload?.messages as Array<Record<string, unknown>>)?.[0]?.text,
@@ -314,8 +359,15 @@ const botMatch = await waitForFrame(
     (frame.payload.opponent as Record<string, unknown>).isBot === true,
 );
 assert.equal((botMatch.payload?.opponent as Record<string, unknown>).name, "FlickBot");
+assert.equal((botMatch.payload?.opponent as Record<string, unknown>).countryCode, "BR");
 assert.equal(await getOnlinePlayerCount(), 1);
 
+solo.receive("match:configure", {
+  countryCode: "JP",
+  formation: "attacking-1-2-3",
+});
+await settle();
+assert.equal(solo.latest("match:setup")?.payload?.ready, true);
 solo.receive("game:shoot", { bodyId: "mint-0", dirX: 0, dirY: -1, pull: 40 });
 await settle();
 solo.receive("game:settled", {

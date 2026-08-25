@@ -236,6 +236,393 @@
   user-select: none;
 }
 
+.setupBackdrop {
+  position: absolute;
+  z-index: 24;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px 12px;
+  background: rgba(4, 13, 9, 0.78);
+  animation: modalFade 180ms ease-out;
+}
+
+.setupCard {
+  width: min(100%, 438px);
+  height: min(680px, calc(100dvh - 36px));
+  max-height: calc(100% - 8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  background: linear-gradient(180deg, #07100d 0%, #030705 100%);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(100, 230, 176, 0.05) inset;
+  animation: modalPop 220ms ease-out;
+}
+
+.setupHeading {
+  flex: 0 0 auto;
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 17px 20px 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.setupHeading span,
+.setupFooter div > span {
+  display: block;
+  margin-bottom: 5px;
+  color: #65e4b2;
+  font-size: 0.48rem;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.setupHeading h2 {
+  margin: 0;
+  color: #f5fbf8;
+  font-size: 1.3rem;
+  font-weight: 900;
+  letter-spacing: -0.035em;
+}
+
+.setupHeading > b {
+  width: 45px;
+  height: 45px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 25%, #34483f, #0b1611 70%);
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.4);
+  font-size: 1.45rem;
+}
+
+.countrySearch {
+  flex: 0 0 auto;
+  padding: 12px 16px 8px;
+}
+
+.countrySearch input {
+  width: 100%;
+  height: 39px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 11px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f3faf7;
+  font: inherit;
+  font-size: 0.68rem;
+}
+
+.countrySearch input::placeholder {
+  color: #71857a;
+}
+
+.countryGrid {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
+  gap: 7px;
+  padding: 5px 16px 15px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2f8564 transparent;
+}
+
+.countryGrid button {
+  min-width: 0;
+  min-height: 67px;
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  padding: 7px 4px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #a9bbb2;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.countryGrid button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(101, 228, 178, 0.35);
+  background: rgba(101, 228, 178, 0.07);
+}
+
+.countryGrid button[data-selected="true"] {
+  border-color: #53dca7;
+  background: rgba(83, 220, 167, 0.15);
+  box-shadow: 0 0 0 2px rgba(83, 220, 167, 0.11) inset;
+}
+
+.countryGrid button > span {
+  font-size: 1.55rem;
+  line-height: 1;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.45));
+}
+
+.countryGrid button small {
+  width: 100%;
+  overflow: hidden;
+  font-size: 0.46rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setupFooter {
+  flex: 0 0 auto;
+  min-height: 67px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  background: #060c09;
+}
+
+.setupFooter div {
+  min-width: 0;
+}
+
+.setupFooter div > strong {
+  display: block;
+  overflow: hidden;
+  color: #eaf5f0;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setupFooter > button {
+  min-height: 43px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #27b77d, #168f68);
+  box-shadow: 0 8px 20px rgba(28, 172, 119, 0.22);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.57rem;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+  transition: transform 140ms ease, filter 140ms ease;
+}
+
+.setupFooter > button:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.setupFooter > button:active {
+  transform: scale(0.97);
+}
+
+.setupFooter > .setupBack {
+  padding-inline: 9px;
+  background: transparent;
+  box-shadow: none;
+  color: #8da198;
+}
+
+.formationScroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 13px 14px 18px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #2f8564 transparent;
+}
+
+.formationGroup + .formationGroup {
+  margin-top: 20px;
+}
+
+.formationGroupTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.formationGroupTitle span {
+  color: #f0f6f3;
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0.13em;
+}
+
+.formationGroupTitle small {
+  color: #667a70;
+  font-size: 0.48rem;
+  font-weight: 750;
+}
+
+.formationGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.formationGrid > button {
+  min-width: 0;
+  padding: 4px 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #879a90;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.formationGrid > button[data-selected="true"] {
+  border-color: #54e4ac;
+  background: rgba(84, 228, 172, 0.1);
+  color: #f3faf7;
+  transform: translateY(-2px);
+}
+
+.formationGrid > button strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.miniPitch {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1.04;
+  display: block;
+  overflow: hidden;
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(255,255,255,0.28) 49%, rgba(255,255,255,0.28) 51%, transparent 51%),
+    repeating-linear-gradient(0deg, #1e6b3c 0, #1e6b3c 13px, #185d34 13px, #185d34 26px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22) inset;
+}
+
+.miniGoal {
+  position: absolute;
+  z-index: 1;
+  left: 31%;
+  bottom: -1px;
+  width: 38%;
+  height: 12%;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.miniHalfway {
+  position: absolute;
+  left: 0;
+  top: 20%;
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.miniDisc {
+  position: absolute;
+  z-index: 2;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  background: #20b5ec;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45), 0 0 5px rgba(32, 181, 236, 0.4);
+}
+
+.setupWaiting {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+}
+
+.waitingBadge {
+  position: relative;
+  z-index: 2;
+  width: 84px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #50dfa9;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 25%, #314a3e, #08110d 70%);
+  box-shadow: 0 0 0 9px rgba(80, 223, 169, 0.08), 0 18px 35px rgba(0, 0, 0, 0.45);
+  font-size: 2.65rem;
+}
+
+.waitingPulse {
+  position: absolute;
+  top: calc(50% - 155px);
+  width: 105px;
+  height: 105px;
+  border: 1px solid rgba(80, 223, 169, 0.55);
+  border-radius: 50%;
+  animation: setupPulse 1.8s ease-out infinite;
+}
+
+.setupWaiting > p {
+  margin: 28px 0 7px;
+  color: #57e1ad;
+  font-size: 0.54rem;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+}
+
+.setupWaiting h2 {
+  margin: 0;
+  color: #f2faf6;
+  font-size: 1.55rem;
+}
+
+.waitingSelection {
+  display: grid;
+  gap: 5px;
+  margin: 22px 0 17px;
+  padding: 12px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.waitingSelection span {
+  color: #e7f1ec;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.waitingSelection strong {
+  color: #7f958a;
+  font-size: 0.52rem;
+  letter-spacing: 0.1em;
+}
+
+.setupWaiting > small {
+  max-width: 260px;
+  color: #6f8379;
+  font-size: 0.56rem;
+  line-height: 1.5;
+}
+
 .reactionPicker {
   position: absolute;
   z-index: 16;
@@ -1546,6 +1933,11 @@
   50% { opacity: 0.52; transform: scale(0.95); }
 }
 
+@keyframes setupPulse {
+  0% { opacity: 0.75; transform: scale(0.8); }
+  100% { opacity: 0; transform: scale(1.45); }
+}
+
 @media (max-width: 500px) {
   .gameShell {
     border-radius: 0;
@@ -1561,6 +1953,16 @@
 
   .playerIdentityRight {
     justify-content: flex-end;
+  }
+
+  .setupBackdrop {
+    padding: 9px 7px;
+  }
+
+  .setupCard {
+    height: calc(100% - 4px);
+    max-height: none;
+    border-radius: 15px;
   }
 }
 

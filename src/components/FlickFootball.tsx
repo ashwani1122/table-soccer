@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   advanceFixedPhysicsClock,
   advanceBallRoll,
@@ -14,6 +14,17 @@ import {
   FIXED_PHYSICS_STEP_SECONDS,
 } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
+import {
+  BOT_PLAYER_SETUP,
+  COUNTRY_CODES,
+  DEFAULT_PLAYER_SETUP,
+  FORMATION_OPTIONS,
+  countryFlagEmoji,
+  countryName,
+  type FormationId,
+  type PlayerSetup,
+  type Team,
+} from "@/lib/match-setup";
 import styles from "./FlickFootball.module.css";
 
 const AuthIdentity = dynamic(() => import("./AuthIdentity"), { ssr: false });
@@ -50,8 +61,9 @@ const AIM_BROADCAST_MS = 60;
 const SMOKE_MIN_SPEED = 150;
 const COLLISION_SOLVER_PASSES = 4;
 
-type Team = "mint" | "coral";
 type Phase = "ready" | "moving" | "goal" | "finished";
+type SetupStage = "country" | "formation" | "waiting" | "ready";
+type TeamSetups = Record<Team, PlayerSetup>;
 
 type Body = {
   id: string;
@@ -119,10 +131,18 @@ type OnlineStage =
 type MatchInfo = {
   matchId: string;
   myTeam: Team;
-  player: { name: string; team: Team; isBot?: boolean };
-  opponent: { name: string; team: Team; isBot?: boolean };
+  player: { name: string; team: Team; isBot?: boolean; countryCode?: string; formation?: FormationId };
+  opponent: { name: string; team: Team; isBot?: boolean; countryCode?: string; formation?: FormationId };
   startsAt: number;
+  setupReady?: boolean;
   roomCode?: string | null;
+};
+
+type MatchSetupPayload = {
+  matchId: string;
+  players: Record<Team, PlayerSetup | null>;
+  ready: boolean;
+  startsAt: number | null;
 };
 
 type ChatMessage = {
@@ -446,20 +466,29 @@ function player(id: string, team: Team, number: number, x: number, y: number): B
   return { id, kind: "player", team, number, x, y, vx: 0, vy: 0, radius: 19, mass: 2.6 };
 }
 
-function makeBodies(): Body[] {
+const DEFAULT_TEAM_SETUPS: TeamSetups = {
+  mint: { ...DEFAULT_PLAYER_SETUP },
+  coral: { ...BOT_PLAYER_SETUP },
+};
+
+const FORMATION_POSITIONS: Record<FormationId, readonly (readonly [number, number])[]> = {
+  "attacking-1-3-2": [[210, 650], [110, 562], [210, 578], [310, 562], [158, 470], [262, 470]],
+  "attacking-1-2-3": [[210, 650], [150, 570], [270, 570], [95, 475], [210, 450], [325, 475]],
+  "attacking-1-4-1": [[210, 650], [85, 560], [165, 575], [255, 575], [335, 560], [210, 445]],
+  "attacking-1-2-1-2": [[210, 650], [145, 580], [275, 580], [210, 520], [145, 450], [275, 450]],
+  "defensive-1-3-2": [[210, 650], [110, 600], [210, 610], [310, 600], [160, 535], [260, 535]],
+  "defensive-1-2-3": [[210, 650], [150, 605], [270, 605], [100, 545], [210, 525], [320, 545]],
+  "defensive-1-4-1": [[210, 650], [85, 600], [165, 610], [255, 610], [335, 600], [210, 520]],
+  "defensive-1-2-1-2": [[210, 650], [145, 610], [275, 610], [210, 560], [150, 510], [270, 510]],
+};
+
+function makeBodies(teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS): Body[] {
+  const mintPositions = FORMATION_POSITIONS[teamSetups.mint.formation];
+  const coralPositions = FORMATION_POSITIONS[teamSetups.coral.formation]
+    .map(([x, y]) => [WIDTH - x, HEIGHT - y] as const);
   return [
-    player("coral-1", "coral", 1, 210, 70),
-    player("coral-2", "coral", 2, 110, 158),
-    player("coral-3", "coral", 3, 210, 142),
-    player("coral-4", "coral", 4, 310, 158),
-    player("coral-5", "coral", 5, 158, 250),
-    player("coral-6", "coral", 6, 262, 250),
-    player("mint-1", "mint", 1, 210, 650),
-    player("mint-2", "mint", 2, 110, 562),
-    player("mint-3", "mint", 3, 210, 578),
-    player("mint-4", "mint", 4, 310, 562),
-    player("mint-5", "mint", 5, 158, 470),
-    player("mint-6", "mint", 6, 262, 470),
+    ...coralPositions.map(([x, y], index) => player(`coral-${index + 1}`, "coral", index + 1, x, y)),
+    ...mintPositions.map(([x, y], index) => player(`mint-${index + 1}`, "mint", index + 1, x, y)),
     {
       id: "ball",
       kind: "ball",
@@ -475,9 +504,9 @@ function makeBodies(): Body[] {
   ];
 }
 
-function makeGame(): Game {
+function makeGame(teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS): Game {
   return {
-    bodies: makeBodies(),
+    bodies: makeBodies(teamSetups),
     activeTeam: "mint",
     phase: "ready",
     score: { mint: 0, coral: 0 },
@@ -1118,6 +1147,7 @@ function drawPlayer(
   carrierFacing: { x: number; y: number } | null,
   keepUpright: boolean,
   animationTime: number,
+  countryCode: string,
 ) {
   const meta = TEAM_META[body.team as Team];
   ctx.save();
@@ -1255,10 +1285,13 @@ function drawPlayer(
   ctx.fillStyle = "#fff";
   ctx.shadowColor = "rgba(0,0,0,0.8)";
   ctx.shadowBlur = 2;
-  ctx.font = "900 8.5px Arial";
+  ctx.font = "16px 'Segoe UI Emoji', 'Apple Color Emoji', sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`${meta.short}${body.number}`, 0, 0.5);
+  ctx.fillText(countryFlagEmoji(countryCode), 0, 0.5);
+  ctx.font = "900 6px Arial";
+  ctx.fillStyle = "#fff";
+  ctx.fillText(String(body.number ?? ""), 7.2, 7.6);
   ctx.shadowColor = "transparent";
   ctx.restore();
 }
@@ -1335,6 +1368,7 @@ function drawGame(
   animationTime: number,
   smoke: SmokeParticle[],
   remoteAim: Drag | null,
+  teamSetups: TeamSetups,
 ) {
   const flipped = viewTeam === "coral";
   ctx.save();
@@ -1357,6 +1391,7 @@ function drawGame(
         game.carrierId === body.id ? game.carrierOffset : null,
         flipped,
         animationTime,
+        teamSetups[body.team as Team].countryCode,
       );
     }
   }
@@ -1376,8 +1411,8 @@ function drawGame(
   ctx.restore();
 }
 
-function resetPositions(game: Game, kickoffTeam: Team) {
-  game.bodies = makeBodies();
+function resetPositions(game: Game, kickoffTeam: Team, teamSetups: TeamSetups) {
+  game.bodies = makeBodies(teamSetups);
   game.activeTeam = kickoffTeam;
   game.phase = "ready";
   game.passChain = 0;
@@ -1470,6 +1505,11 @@ export default function FlickFootball({
   const matchRef = useRef<MatchInfo | null>(null);
   const latestSyncRef = useRef<CachedSync | null>(null);
   const latestShotRef = useRef<CachedShot | null>(null);
+  const matchSetupReadyRef = useRef(true);
+  const teamSetupsRef = useRef<TeamSetups>({
+    mint: { ...DEFAULT_TEAM_SETUPS.mint },
+    coral: { ...DEFAULT_TEAM_SETUPS.coral },
+  });
   const [session, setSession] = useState(0);
   const [showRules, setShowRules] = useState(false);
   const [hud, setHud] = useState<Hud>(() => toHud(makeGame()));
@@ -1492,6 +1532,20 @@ export default function FlickFootball({
   const [unreadChat, setUnreadChat] = useState(0);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [reactions, setReactions] = useState<GameReaction[]>([]);
+  const [setupStage, setSetupStage] = useState<SetupStage>("ready");
+  const [selectedCountry, setSelectedCountry] = useState(DEFAULT_PLAYER_SETUP.countryCode);
+  const [selectedFormation, setSelectedFormation] = useState<FormationId>(DEFAULT_PLAYER_SETUP.formation);
+  const [countryQuery, setCountryQuery] = useState("");
+  const [teamSetups, setTeamSetups] = useState<TeamSetups>({
+    mint: { ...DEFAULT_TEAM_SETUPS.mint },
+    coral: { ...DEFAULT_TEAM_SETUPS.coral },
+  });
+  const visibleCountries = useMemo(() => {
+    const query = countryQuery.trim().toLowerCase();
+    return [...COUNTRY_CODES]
+      .sort((first, second) => countryName(first).localeCompare(countryName(second)))
+      .filter((code) => !query || countryName(code).toLowerCase().includes(query) || code.toLowerCase().includes(query));
+  }, [countryQuery]);
 
   useEffect(() => {
     onlineStageRef.current = onlineStage;
@@ -1571,6 +1625,36 @@ export default function FlickFootball({
   useEffect(() => {
     matchRef.current = match;
   }, [match]);
+
+  const installTeamSetups = (next: TeamSetups) => {
+    teamSetupsRef.current = next;
+    setTeamSetups(next);
+  };
+
+  const installMatchSetup = (data: MatchInfo) => {
+    const next: TeamSetups = {
+      mint: { ...DEFAULT_TEAM_SETUPS.mint },
+      coral: { ...DEFAULT_TEAM_SETUPS.coral },
+    };
+    for (const participant of [data.player, data.opponent]) {
+      if (participant.countryCode && participant.formation) {
+        next[participant.team] = {
+          countryCode: participant.countryCode,
+          formation: participant.formation,
+        };
+      }
+    }
+    installTeamSetups(next);
+    const localSetup = data.player.countryCode && data.player.formation
+      ? { countryCode: data.player.countryCode, formation: data.player.formation }
+      : null;
+    if (localSetup) {
+      setSelectedCountry(localSetup.countryCode);
+      setSelectedFormation(localSetup.formation);
+    }
+    matchSetupReadyRef.current = data.setupReady === true;
+    setSetupStage(data.setupReady === true ? "ready" : localSetup ? "waiting" : "country");
+  };
 
   useEffect(() => {
     if (onlineStage !== "searching") return;
@@ -1752,6 +1836,31 @@ export default function FlickFootball({
         setNetworkMessage("This private room was closed.");
         setOnlineStage("disconnected");
       });
+      socket.on("match:setup", (data: MatchSetupPayload) => {
+        const activeMatch = matchRef.current;
+        if (!activeMatch || data.matchId !== activeMatch.matchId) return;
+        const next: TeamSetups = {
+          mint: data.players.mint ?? teamSetupsRef.current.mint,
+          coral: data.players.coral ?? teamSetupsRef.current.coral,
+        };
+        installTeamSetups(next);
+        setMatch((current) => {
+          if (!current || current.matchId !== data.matchId) return current;
+          const localSetup = data.players[current.myTeam];
+          const opponentTeam: Team = current.myTeam === "mint" ? "coral" : "mint";
+          const opponentSetup = data.players[opponentTeam];
+          return {
+            ...current,
+            setupReady: data.ready,
+            player: { ...current.player, ...localSetup },
+            opponent: { ...current.opponent, ...opponentSetup },
+          };
+        });
+        const wasReady = matchSetupReadyRef.current;
+        matchSetupReadyRef.current = data.ready;
+        setSetupStage(data.ready ? "ready" : data.players[activeMatch.myTeam] ? "waiting" : "country");
+        if (data.ready && !wasReady) setSession((value) => value + 1);
+      });
       socket.on("match:found", (data: MatchInfo) => {
         connectionReadyRef.current = true;
         kickoffTeamRef.current = "mint";
@@ -1772,8 +1881,9 @@ export default function FlickFootball({
         setReactionPickerOpen(false);
         setReactions([]);
         opponentConnectedRef.current = true;
+        installMatchSetup(data);
         setOnlineStage("matched");
-        setSession((value) => value + 1);
+        if (data.setupReady) setSession((value) => value + 1);
       });
       socket.on("match:resumed", (data: MatchInfo) => {
         const needsCanvasRestore = onlineStageRef.current !== "matched";
@@ -1785,8 +1895,9 @@ export default function FlickFootball({
         setReconnecting(false);
         setOpponentReconnecting(false);
         setNetworkMessage("");
+        installMatchSetup(data);
         setOnlineStage("matched");
-        if (needsCanvasRestore) setSession((value) => value + 1);
+        if (needsCanvasRestore && data.setupReady) setSession((value) => value + 1);
       });
       socket.on("match:opponent-reconnecting", () => {
         opponentConnectedRef.current = false;
@@ -1967,7 +2078,37 @@ export default function FlickFootball({
     setRoomPending(false);
     setNetworkMessage("");
     resetMatchSocial();
+    matchSetupReadyRef.current = false;
+    installTeamSetups({
+      mint: { ...DEFAULT_PLAYER_SETUP },
+      coral: { ...BOT_PLAYER_SETUP },
+    });
+    setSelectedCountry(DEFAULT_PLAYER_SETUP.countryCode);
+    setSelectedFormation(DEFAULT_PLAYER_SETUP.formation);
+    setCountryQuery("");
+    setSetupStage("country");
     setOnlineStage("practice");
+    setSession((value) => value + 1);
+  };
+
+  const confirmFormation = () => {
+    const localSetup: PlayerSetup = {
+      countryCode: selectedCountry,
+      formation: selectedFormation,
+    };
+    const localSetupTeam: Team = match?.myTeam ?? "mint";
+    installTeamSetups({
+      ...teamSetupsRef.current,
+      [localSetupTeam]: localSetup,
+    });
+    if (onlineStage === "matched") {
+      matchSetupReadyRef.current = false;
+      setSetupStage("waiting");
+      socketRef.current?.emit("match:configure", localSetup);
+      return;
+    }
+    matchSetupReadyRef.current = true;
+    setSetupStage("ready");
     setSession((value) => value + 1);
   };
 
@@ -1980,6 +2121,8 @@ export default function FlickFootball({
     setRoomPending(false);
     setNetworkMessage("");
     resetMatchSocial();
+    matchSetupReadyRef.current = true;
+    setSetupStage("ready");
     setOnlineStage("menu");
     setSession((value) => value + 1);
   };
@@ -1996,7 +2139,7 @@ export default function FlickFootball({
     canvas.height = HEIGHT * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const game = makeGame();
+    const game = makeGame(teamSetupsRef.current);
     const viewTeam: Team = onlineStage === "matched" && match ? match.myTeam : "mint";
     game.activeTeam = kickoffTeamRef.current;
     game.message = onlineStage === "matched"
@@ -2110,6 +2253,7 @@ export default function FlickFootball({
 
     const onPointerDown = (event: PointerEvent) => {
       sounds?.unlock();
+      if (!matchSetupReadyRef.current) return;
       if (game.phase !== "ready" || shotPending) return;
       if (onlineStage !== "practice" && onlineStage !== "matched") return;
       if (onlineStage === "matched" && !connectionReadyRef.current) {
@@ -2263,7 +2407,7 @@ export default function FlickFootball({
       if (game.phase === "goal" && game.goalResetAt && now >= game.goalResetAt) {
         const authorityTeam = game.activeTeam;
         const kickoff = game.message.startsWith(TEAM_META.mint.name) ? "coral" : "mint";
-        resetPositions(game, kickoff);
+        resetPositions(game, kickoff, teamSetupsRef.current);
         syncHud();
         sounds?.turn();
         if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
@@ -2507,6 +2651,7 @@ export default function FlickFootball({
     };
 
     const updateTurnClock = (dt: number) => {
+      if (!matchSetupReadyRef.current) return;
       if (game.phase !== "ready" || game.drag) return;
       game.turnTime -= dt;
       const tick = Math.ceil(game.turnTime);
@@ -2538,7 +2683,7 @@ export default function FlickFootball({
 
       const ball = game.bodies.find((body) => body.kind === "ball");
       if (ball) updateSmokeTrail(smoke, ball, fixedFrame.elapsed);
-      drawGame(ctx, game, viewTeam, now, smoke, remoteAim);
+      drawGame(ctx, game, viewTeam, now, smoke, remoteAim, teamSetupsRef.current);
       updateAndDrawConfetti(ctx, confetti, fixedFrame.elapsed);
       frameId = requestAnimationFrame(loop);
     };
@@ -2597,7 +2742,12 @@ export default function FlickFootball({
   const mintName = nameForTeam("mint");
   const coralName = nameForTeam("coral");
   const localTeam: Team = onlineStage === "matched" && match ? match.myTeam : "mint";
-  const socialEnabled = onlineStage === "matched" && Boolean(match && !match.opponent.isBot);
+  const showTeamSetup = (onlineStage === "matched" || onlineStage === "practice")
+    && setupStage !== "ready"
+    && !reconnecting;
+  const socialEnabled = onlineStage === "matched"
+    && setupStage === "ready"
+    && Boolean(match && !match.opponent.isBot);
   const localPlayerWon = hud.winner === localTeam;
   const showResultModal = (onlineStage === "matched" || onlineStage === "practice")
     && (hud.phase === "goal" || hud.phase === "finished")
@@ -2606,6 +2756,8 @@ export default function FlickFootball({
     ? "RECONNECTING TO MATCH..."
     : opponentReconnecting
       ? "OPPONENT IS RECONNECTING..."
+      : setupStage !== "ready"
+        ? setupStage === "waiting" ? "WAITING FOR TEAM SETUP" : "SELECT YOUR TEAM"
       : onlineStage === "matched" && match?.myTeam !== hud.activeTeam && hud.phase === "ready"
         ? "OPPONENT IS AIMING"
         : hud.message;
@@ -2622,7 +2774,7 @@ export default function FlickFootball({
         </button>
 
         <div className={styles.playerIdentity}>
-          <span className={`${styles.avatar} ${styles.mintAvatar}`}>{mintName.charAt(0).toUpperCase()}</span>
+          <span className={`${styles.avatar} ${styles.mintAvatar}`}>{countryFlagEmoji(teamSetups.mint.countryCode)}</span>
           <span className={styles.playerName}>{mintName}</span>
         </div>
 
@@ -2639,7 +2791,7 @@ export default function FlickFootball({
 
         <div className={`${styles.playerIdentity} ${styles.playerIdentityRight}`}>
           <span className={styles.playerName}>{coralName}</span>
-          <span className={`${styles.avatar} ${styles.coralAvatar}`}>{coralName.charAt(0).toUpperCase()}</span>
+          <span className={`${styles.avatar} ${styles.coralAvatar}`}>{countryFlagEmoji(teamSetups.coral.countryCode)}</span>
         </div>
 
         <button
@@ -2758,6 +2910,120 @@ export default function FlickFootball({
             </div>
             <button type="submit" disabled={!chatInput.trim()} aria-label="Send message">↑</button>
           </form>
+        </div>
+      ) : null}
+
+      {showTeamSetup ? (
+        <div className={styles.setupBackdrop}>
+          <section className={styles.setupCard} role="dialog" aria-modal="true" aria-labelledby="setup-title">
+            {setupStage === "country" ? (
+              <>
+                <div className={styles.setupHeading}>
+                  <div>
+                    <span>TEAM SETUP · 1 OF 2</span>
+                    <h2 id="setup-title">Select your country</h2>
+                  </div>
+                  <b>{countryFlagEmoji(selectedCountry)}</b>
+                </div>
+                <label className={styles.countrySearch}>
+                  <span className={styles.srOnly}>Search countries</span>
+                  <input
+                    autoFocus
+                    type="search"
+                    value={countryQuery}
+                    placeholder="Search any country..."
+                    onChange={(event) => setCountryQuery(event.target.value)}
+                  />
+                </label>
+                <div className={styles.countryGrid} role="listbox" aria-label="Countries">
+                  {visibleCountries.map((countryCode) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selectedCountry === countryCode}
+                      data-selected={selectedCountry === countryCode}
+                      key={countryCode}
+                      onClick={() => setSelectedCountry(countryCode)}
+                      title={countryName(countryCode)}
+                    >
+                      <span>{countryFlagEmoji(countryCode)}</span>
+                      <small>{countryName(countryCode)}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.setupFooter}>
+                  <div>
+                    <span>SELECTED TEAM</span>
+                    <strong>{countryFlagEmoji(selectedCountry)} {countryName(selectedCountry)}</strong>
+                  </div>
+                  <button type="button" onClick={() => setSetupStage("formation")}>CONTINUE <span>→</span></button>
+                </div>
+              </>
+            ) : setupStage === "formation" ? (
+              <>
+                <div className={styles.setupHeading}>
+                  <div>
+                    <span>TEAM SETUP · 2 OF 2</span>
+                    <h2 id="setup-title">Select your formation</h2>
+                  </div>
+                  <b>{countryFlagEmoji(selectedCountry)}</b>
+                </div>
+                <div className={styles.formationScroll}>
+                  {(["attacking", "defensive"] as const).map((style) => (
+                    <section className={styles.formationGroup} key={style}>
+                      <div className={styles.formationGroupTitle}>
+                        <span>{style === "attacking" ? "ATTACKING" : "DEFENSIVE"}</span>
+                        <small>{style === "attacking" ? "More players forward" : "Protect your goal"}</small>
+                      </div>
+                      <div className={styles.formationGrid}>
+                        {FORMATION_OPTIONS.filter((option) => option.style === style).map((option) => (
+                          <button
+                            type="button"
+                            data-selected={selectedFormation === option.id}
+                            aria-pressed={selectedFormation === option.id}
+                            key={option.id}
+                            onClick={() => setSelectedFormation(option.id)}
+                          >
+                            <span className={styles.miniPitch} aria-hidden="true">
+                              <i className={styles.miniGoal} />
+                              <i className={styles.miniHalfway} />
+                              {FORMATION_POSITIONS[option.id].map(([x, y], index) => (
+                                <i
+                                  className={styles.miniDisc}
+                                  key={`${option.id}-${index}`}
+                                  style={{
+                                    left: `${8 + ((x - 60) / 300) * 84}%`,
+                                    top: `${8 + ((y - 430) / 230) * 80}%`,
+                                  }}
+                                />
+                              ))}
+                            </span>
+                            <strong>{option.label}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+                <div className={styles.setupFooter}>
+                  <button className={styles.setupBack} type="button" onClick={() => setSetupStage("country")}>← BACK</button>
+                  <button type="button" onClick={confirmFormation}>CONFIRM FORMATION <span>✓</span></button>
+                </div>
+              </>
+            ) : (
+              <div className={styles.setupWaiting}>
+                <div className={styles.waitingBadge}>{countryFlagEmoji(selectedCountry)}</div>
+                <span className={styles.waitingPulse} aria-hidden="true" />
+                <p>YOUR TEAM IS READY</p>
+                <h2 id="setup-title">Waiting for opponent</h2>
+                <div className={styles.waitingSelection}>
+                  <span>{countryName(selectedCountry)}</span>
+                  <strong>{FORMATION_OPTIONS.find((option) => option.id === selectedFormation)?.style.toUpperCase()} · {FORMATION_OPTIONS.find((option) => option.id === selectedFormation)?.label}</strong>
+                </div>
+                <small>The match begins automatically when both teams confirm.</small>
+              </div>
+            )}
+          </section>
         </div>
       ) : null}
 
