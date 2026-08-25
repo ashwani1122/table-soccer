@@ -302,8 +302,8 @@ export function advanceBallOrientation(
   const halfAngle = distance / Math.max(0.001, radius) / 2;
   const sine = Math.sin(halfAngle);
   const incremental: BallOrientation = [
-    (travelY / distance) * sine,
-    (-travelX / distance) * sine,
+    (-travelY / distance) * sine,
+    (travelX / distance) * sine,
     0,
     Math.cos(halfAngle),
   ];

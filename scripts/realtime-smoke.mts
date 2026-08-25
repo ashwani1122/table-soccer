@@ -65,10 +65,10 @@ const oneRadiusOrientation = advanceBallOrientation(
   0,
   12,
 );
-assert(Math.abs(oneRadiusOrientation[1] + Math.sin(0.5)) < 1e-9);
+assert(Math.abs(oneRadiusOrientation[1] - Math.sin(0.5)) < 1e-9);
 assert(Math.abs(oneRadiusOrientation[3] - Math.cos(0.5)) < 1e-9);
 const oneRadiusSurface = orientVectorWithBall([0, 0, 1], oneRadiusOrientation);
-assert(Math.abs(oneRadiusSurface[0] + Math.sin(1)) < 1e-9);
+assert(Math.abs(oneRadiusSurface[0] - Math.sin(1)) < 1e-9);
 assert(Math.abs(oneRadiusSurface[2] - Math.cos(1)) < 1e-9);
 const cornerOrientation = advanceBallOrientation(oneRadiusOrientation, 0, 12, 12);
 assert(Math.abs(Math.hypot(...cornerOrientation) - 1) < 1e-9);
