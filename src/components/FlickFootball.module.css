@@ -242,15 +242,22 @@
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 18px 12px;
+  min-height: 0;
+  padding:
+    max(14px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
   background: rgba(4, 13, 9, 0.78);
+  overscroll-behavior: contain;
   animation: modalFade 180ms ease-out;
 }
 
 .setupCard {
   width: min(100%, 438px);
-  height: min(680px, calc(100dvh - 36px));
-  max-height: calc(100% - 8px);
+  height: min(680px, 100%);
+  min-height: 0;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -305,13 +312,13 @@
 
 .countrySearch {
   flex: 0 0 auto;
-  padding: 12px 16px 8px;
+  padding: 12px 16px 9px;
 }
 
 .countrySearch input {
   width: 100%;
-  height: 39px;
-  padding: 0 13px;
+  height: 42px;
+  padding: 0 14px;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 11px;
   outline: 0;
@@ -329,11 +336,14 @@
   min-height: 0;
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   align-content: start;
-  gap: 7px;
-  padding: 5px 16px 15px;
+  gap: 8px;
+  padding: 5px 16px 16px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: #2f8564 transparent;
 }
@@ -383,14 +393,15 @@
 
 .setupFooter {
   flex: 0 0 auto;
-  min-height: 67px;
+  min-height: 76px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 14px;
+  padding: 12px 16px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.09);
-  background: #060c09;
+  background: linear-gradient(180deg, #09130f, #050a08);
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.2);
 }
 
 .setupFooter div {
@@ -407,8 +418,8 @@
 }
 
 .setupFooter > button {
-  min-height: 43px;
-  padding: 0 15px;
+  min-height: 46px;
+  padding: 0 17px;
   border: 0;
   border-radius: 11px;
   background: linear-gradient(135deg, #27b77d, #168f68);
@@ -442,6 +453,9 @@
   flex: 1 1 auto;
   padding: 13px 14px 18px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 18px;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: #2f8564 transparent;
 }
@@ -1978,19 +1992,74 @@
   }
 
   .setupBackdrop {
-    padding: 9px 7px;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(7px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(7px, env(safe-area-inset-left));
   }
 
   .setupCard {
-    height: calc(100% - 4px);
-    max-height: none;
+    height: 100%;
+    max-height: 100%;
     border-radius: 15px;
+  }
+
+  .setupHeading {
+    min-height: 74px;
+    padding: 13px 15px 11px;
+  }
+
+  .setupHeading h2 {
+    font-size: 1.15rem;
+  }
+
+  .setupHeading > b {
+    width: 41px;
+    height: 41px;
+  }
+
+  .countrySearch {
+    padding: 10px 12px 7px;
+  }
+
+  .countryGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 5px 12px 12px;
+  }
+
+  .countryGrid button {
+    min-height: 64px;
+  }
+
+  .formationScroll {
+    padding: 11px 12px 14px;
+  }
+
+  .setupFooter {
+    min-height: 78px;
+    gap: 9px;
+    padding: 10px 12px 14px;
+  }
+
+  .setupFooter > button {
+    min-height: 48px;
   }
 }
 
 @media (max-width: 380px) {
   .passPips span {
     display: none;
+  }
+
+  .countryGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .setupFooter > button {
+    padding-inline: 12px;
+    letter-spacing: 0.045em;
   }
 }
 

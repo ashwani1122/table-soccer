@@ -3024,10 +3024,11 @@ export default function FlickFootball({
                 <label className={styles.countrySearch}>
                   <span className={styles.srOnly}>Search countries</span>
                   <input
-                    autoFocus
                     type="search"
                     value={countryQuery}
                     placeholder="Search any country..."
+                    autoComplete="off"
+                    enterKeyHint="search"
                     onChange={(event) => setCountryQuery(event.target.value)}
                   />
                 </label>
@@ -3039,7 +3040,12 @@ export default function FlickFootball({
                       aria-selected={selectedCountry === countryCode}
                       data-selected={selectedCountry === countryCode}
                       key={countryCode}
-                      onClick={() => setSelectedCountry(countryCode)}
+                      onClick={() => {
+                        setSelectedCountry(countryCode);
+                        if (document.activeElement instanceof HTMLElement) {
+                          document.activeElement.blur();
+                        }
+                      }}
                       title={countryName(countryCode)}
                     >
                       <span>{countryFlagEmoji(countryCode)}</span>
