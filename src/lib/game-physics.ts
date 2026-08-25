@@ -262,6 +262,72 @@ export type BallRoll = {
   angle: number;
 };
 
+export type BallOrientation = [number, number, number, number];
+
+export const IDENTITY_BALL_ORIENTATION: BallOrientation = [0, 0, 0, 1];
+
+function normalizeBallOrientation(
+  [x, y, z, w]: BallOrientation,
+): BallOrientation {
+  const length = Math.max(0.000001, Math.hypot(x, y, z, w));
+  return [x / length, y / length, z / length, w / length];
+}
+
+function multiplyBallOrientations(
+  [ax, ay, az, aw]: BallOrientation,
+  [bx, by, bz, bw]: BallOrientation,
+): BallOrientation {
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ];
+}
+
+/**
+ * Accumulates true no-slip sphere rotation from the ball's final displacement.
+ * The rotation angle is exactly distance / radius and composes across direction
+ * changes, so bank shots do not reset or jump the visible surface orientation.
+ */
+export function advanceBallOrientation(
+  current: BallOrientation,
+  travelX: number,
+  travelY: number,
+  radius: number,
+): BallOrientation {
+  const distance = Math.hypot(travelX, travelY);
+  if (!Number.isFinite(distance) || distance < 0.0001) return current;
+
+  const halfAngle = distance / Math.max(0.001, radius) / 2;
+  const sine = Math.sin(halfAngle);
+  const incremental: BallOrientation = [
+    (travelY / distance) * sine,
+    (-travelX / distance) * sine,
+    0,
+    Math.cos(halfAngle),
+  ];
+  return normalizeBallOrientation(multiplyBallOrientations(incremental, current));
+}
+
+export function orientVectorWithBall(
+  [vx, vy, vz]: [number, number, number],
+  [qx, qy, qz, qw]: BallOrientation,
+): [number, number, number] {
+  // Optimized quaternion-vector rotation: v + 2w(q × v) + 2(q × (q × v)).
+  const crossX = qy * vz - qz * vy;
+  const crossY = qz * vx - qx * vz;
+  const crossZ = qx * vy - qy * vx;
+  const doubleCrossX = 2 * (qy * crossZ - qz * crossY);
+  const doubleCrossY = 2 * (qz * crossX - qx * crossZ);
+  const doubleCrossZ = 2 * (qx * crossY - qy * crossX);
+  return [
+    vx + 2 * qw * crossX + doubleCrossX,
+    vy + 2 * qw * crossY + doubleCrossY,
+    vz + 2 * qw * crossZ + doubleCrossZ,
+  ];
+}
+
 export function advanceBallRoll(
   currentPhase: number,
   currentAngle: number,

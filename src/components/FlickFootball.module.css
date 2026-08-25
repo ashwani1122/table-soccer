@@ -1221,6 +1221,28 @@
   content: none;
 }
 
+.homeOverlay {
+  padding-bottom: max(88px, calc(env(safe-area-inset-bottom) + 74px));
+}
+
+.landingAuth {
+  position: absolute;
+  z-index: 2;
+  right: 16px;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  left: 16px;
+  width: min(calc(100% - 32px), 400px);
+  margin-inline: auto;
+}
+
+.landingAuth .googleButton,
+.landingAuth .signedIdentity,
+.landingAuth .authSkeleton {
+  margin: 0;
+  background: rgba(5, 24, 17, 0.84);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+
 .matchCard {
   position: relative;
   width: min(100%, 400px);

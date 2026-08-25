@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import type { WebSocket } from "ws";
 import {
+  advanceBallOrientation,
   advanceFixedPhysicsClock,
   advanceBallRoll,
   calculatePossessionImpact,
@@ -11,6 +12,8 @@ import {
   resolveBallPlayerCollision,
   resolvePossessedBallCollision,
   FIXED_PHYSICS_STEP_SECONDS,
+  IDENTITY_BALL_ORIENTATION,
+  orientVectorWithBall,
 } from "../src/lib/game-physics.ts";
 import { getOnlinePlayerCount, registerGameSocket } from "../src/lib/realtime-game.ts";
 
@@ -55,6 +58,22 @@ assert.equal(eastRoll.angle, 0);
 const northWestRoll = advanceBallRoll(eastRoll.phase, eastRoll.angle, -6, -6, 12);
 assert(northWestRoll.phase > eastRoll.phase);
 assert(northWestRoll.angle < -Math.PI / 2);
+
+const oneRadiusOrientation = advanceBallOrientation(
+  IDENTITY_BALL_ORIENTATION,
+  12,
+  0,
+  12,
+);
+assert(Math.abs(oneRadiusOrientation[1] + Math.sin(0.5)) < 1e-9);
+assert(Math.abs(oneRadiusOrientation[3] - Math.cos(0.5)) < 1e-9);
+const oneRadiusSurface = orientVectorWithBall([0, 0, 1], oneRadiusOrientation);
+assert(Math.abs(oneRadiusSurface[0] + Math.sin(1)) < 1e-9);
+assert(Math.abs(oneRadiusSurface[2] - Math.cos(1)) < 1e-9);
+const cornerOrientation = advanceBallOrientation(oneRadiusOrientation, 0, 12, 12);
+assert(Math.abs(Math.hypot(...cornerOrientation) - 1) < 1e-9);
+const cornerSurface = orientVectorWithBall([0, 0, 1], cornerOrientation);
+assert(Math.abs(Math.hypot(...cornerSurface) - 1) < 1e-9);
 
 const passPlayer = { x: 100, y: 100, radius: 19 };
 const passBall = { x: 138, y: 100, radius: 12 };

@@ -30,8 +30,8 @@ export default function AuthIdentity({ onIdentity }: { onIdentity: (name: string
     <SignInButton mode="modal">
       <button className={styles.googleButton} type="button">
         <b aria-hidden="true">G</b>
-        <span>CONTINUE WITH GOOGLE</span>
-        <small>OPTIONAL</small>
+        <span>SIGN IN WITH GOOGLE</span>
+        <small>ACCOUNT</small>
       </button>
     </SignInButton>
   );

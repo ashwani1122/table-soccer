@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   advanceFixedPhysicsClock,
-  advanceBallRoll,
+  advanceBallOrientation,
   calculatePossessionImpact,
   capturePossessionMomentum,
   constrainBodyToGoalArena,
@@ -12,6 +12,9 @@ import {
   resolveBallPlayerCollision,
   resolvePossessedBallCollision,
   FIXED_PHYSICS_STEP_SECONDS,
+  IDENTITY_BALL_ORIENTATION,
+  orientVectorWithBall,
+  type BallOrientation,
 } from "@/lib/game-physics";
 import { RealtimeClient } from "@/lib/realtime-client";
 import {
@@ -45,8 +48,8 @@ const GOAL_ARENA = {
 const MAX_PULL = 92;
 const MAX_SPEED = 960;
 const BALL_RADIUS = 12;
-const BALL_WALL_RESTITUTION = 0.985;
-const BALL_COLLISION_RESTITUTION = 0.995;
+const BALL_WALL_RESTITUTION = 0.997;
+const BALL_COLLISION_RESTITUTION = 0.999;
 const BALL_FRICTION = 1.05;
 const PLAYER_FRICTION = 2.2;
 const REACTION_OPTIONS = ["⚽", "🔥", "👏", "😂", "😮", "💚"] as const;
@@ -59,7 +62,6 @@ const BALL_TO_PLAYER_TRANSFER = 0.5;
 const RESULT_HOME_DELAY = 3_000;
 const AIM_BROADCAST_MS = 60;
 const TURF_TRAIL_MIN_SPEED = 210;
-const VISUAL_ROLL_SCALE = 0.58;
 const COLLISION_SOLVER_PASSES = 4;
 
 type Phase = "ready" | "moving" | "goal" | "finished";
@@ -77,8 +79,7 @@ type Body = {
   radius: number;
   mass: number;
   number?: number;
-  rollPhase?: number;
-  rollAngle?: number;
+  rollOrientation?: BallOrientation;
 };
 
 type Drag = {
@@ -511,8 +512,7 @@ function makeBodies(teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS): Body[] {
       vy: 0,
       radius: BALL_RADIUS,
       mass: 0.7,
-      rollPhase: 0,
-      rollAngle: 0,
+      rollOrientation: [...IDENTITY_BALL_ORIENTATION],
     },
   ];
 }
@@ -950,12 +950,11 @@ function rotateBallVector(
   ];
 }
 
-function orientFootballVector(vector: BallVector, rollAxis: BallVector, rollPhase: number) {
+function orientFootballVector(vector: BallVector, orientation: BallOrientation) {
   const presentationTilt = Math.atan(1 / FOOTBALL_PHI);
-  return rotateBallVector(
+  return orientVectorWithBall(
     rotateBallVector(vector, [1, 0, 0], presentationTilt),
-    rollAxis,
-    rollPhase,
+    orientation,
   );
 }
 
@@ -1013,20 +1012,16 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   ctx.arc(0, 0, radius - 0.55, 0, Math.PI * 2);
   ctx.clip();
 
-  const rollAngle = ball.rollAngle ?? 0;
-  // The physical no-slip phase advances very quickly at this scale. Slowing only
-  // its presentation prevents 60 Hz displays from aliasing it into a frozen slide.
-  const rollPhase = (ball.rollPhase ?? 0) * VISUAL_ROLL_SCALE;
-  const rollAxis: BallVector = [Math.sin(rollAngle), -Math.cos(rollAngle), 0];
+  const rollOrientation = ball.rollOrientation ?? IDENTITY_BALL_ORIENTATION;
   const panelRadius = 0.285;
   const seamRadius = 0.5;
   const panels = FOOTBALL_PANEL_CENTERS.map((sourceCenter) => {
     const reference: BallVector = Math.abs(sourceCenter[2]) > 0.86 ? [0, 1, 0] : [0, 0, 1];
     const sourceTangent = normalizeBallVector(crossBallVectors(reference, sourceCenter));
     const sourceBitangent = normalizeBallVector(crossBallVectors(sourceCenter, sourceTangent));
-    const center = orientFootballVector(sourceCenter, rollAxis, rollPhase);
-    const tangent = orientFootballVector(sourceTangent, rollAxis, rollPhase);
-    const bitangent = orientFootballVector(sourceBitangent, rollAxis, rollPhase);
+    const center = orientFootballVector(sourceCenter, rollOrientation);
+    const tangent = orientFootballVector(sourceTangent, rollOrientation);
+    const bitangent = orientFootballVector(sourceBitangent, rollOrientation);
     return { center, tangent, bitangent };
   }).filter(({ center }) => center[2] > -0.1)
     .sort((a, b) => a.center[2] - b.center[2]);
@@ -1116,8 +1111,7 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Body) {
   // otherwise repeating black-and-white panel pattern rolls.
   const logoAnchor = orientFootballVector(
     normalizeBallVector([0.42, -0.28, 0.86]),
-    rollAxis,
-    rollPhase,
+    rollOrientation,
   );
   if (logoAnchor[2] > 0.08) {
     ctx.globalAlpha = clamp((logoAnchor[2] - 0.08) / 0.72, 0, 0.82);
@@ -1506,7 +1500,12 @@ function switchTurn(game: Game, reason = "TURN CHANGED") {
 function makeSnapshot(game: Game): GameSnapshot {
   return {
     ...game,
-    bodies: game.bodies.map((body) => ({ ...body })),
+    bodies: game.bodies.map((body) => ({
+      ...body,
+      rollOrientation: body.rollOrientation
+        ? [...body.rollOrientation] as BallOrientation
+        : undefined,
+    })),
     score: { ...game.score },
     carrierOffset: game.carrierOffset ? { ...game.carrierOffset } : null,
     carrierTargetOffset: game.carrierTargetOffset ? { ...game.carrierTargetOffset } : null,
@@ -1516,7 +1515,12 @@ function makeSnapshot(game: Game): GameSnapshot {
 }
 
 function applySnapshot(game: Game, snapshot: GameSnapshot) {
-  game.bodies = snapshot.bodies.map((body) => ({ ...body }));
+  game.bodies = snapshot.bodies.map((body) => ({
+    ...body,
+    rollOrientation: body.rollOrientation
+      ? [...body.rollOrientation] as BallOrientation
+      : undefined,
+  }));
   game.activeTeam = snapshot.activeTeam;
   game.phase = snapshot.phase;
   game.score = { ...snapshot.score };
@@ -2123,28 +2127,6 @@ export default function FlickFootball({
     setOnlineStage("menu");
   };
 
-  const startPractice = () => {
-    soundRef.current?.unlock();
-    closeSocket();
-    kickoffTeamRef.current = "mint";
-    setMatch(null);
-    setRoomCode("");
-    setRoomPending(false);
-    setNetworkMessage("");
-    resetMatchSocial();
-    matchSetupReadyRef.current = false;
-    installTeamSetups({
-      mint: { ...DEFAULT_PLAYER_SETUP },
-      coral: { ...BOT_PLAYER_SETUP },
-    });
-    setSelectedCountry(DEFAULT_PLAYER_SETUP.countryCode);
-    setSelectedFormation(DEFAULT_PLAYER_SETUP.formation);
-    setCountryQuery("");
-    setSetupStage("country");
-    setOnlineStage("practice");
-    setSession((value) => value + 1);
-  };
-
   const confirmFormation = () => {
     const localSetup: PlayerSetup = {
       countryCode: selectedCountry,
@@ -2471,23 +2453,14 @@ export default function FlickFootball({
 
       const ball = game.bodies.find((body) => body.kind === "ball");
       if (!ball) return;
+      const ballStartX = ball.x;
+      const ballStartY = ball.y;
 
       for (const body of game.bodies) {
         const travelX = body.vx * dt;
         const travelY = body.vy * dt;
         body.x += travelX;
         body.y += travelY;
-        if (body.kind === "ball") {
-          const roll = advanceBallRoll(
-            body.rollPhase ?? 0,
-            body.rollAngle ?? 0,
-            travelX,
-            travelY,
-            body.radius,
-          );
-          body.rollPhase = roll.phase;
-          body.rollAngle = roll.angle;
-        }
         const isPossessionBody = Boolean(
           game.carrierId && (body.kind === "ball" || body.id === game.carrierId),
         );
@@ -2659,6 +2632,15 @@ export default function FlickFootball({
         }
       }
       if (!game.carrierId) constrainFreeBallToPitch(ball);
+
+      // Use the final displacement after wall, disc, and possession corrections.
+      // This keeps angular travel at exactly distance / radius with no visual slip.
+      ball.rollOrientation = advanceBallOrientation(
+        ball.rollOrientation ?? IDENTITY_BALL_ORIENTATION,
+        ball.x - ballStartX,
+        ball.y - ballStartY,
+        ball.radius,
+      );
 
       if (ball.y + ball.radius < FIELD.top && ball.x > GOAL_LEFT && ball.x < GOAL_RIGHT) {
         scoreGoal("mint", now);
@@ -3144,7 +3126,7 @@ export default function FlickFootball({
       ) : null}
 
       {onlineStage === "menu" ? (
-        <div className={styles.matchOverlay}>
+        <div className={`${styles.matchOverlay} ${styles.homeOverlay}`}>
           <div className={styles.matchCard}>
             <div className={styles.livePill} role="status" aria-live="polite">
               <span />
@@ -3166,7 +3148,6 @@ export default function FlickFootball({
                 aria-label="Player name"
               />
             </label>
-            {authEnabled ? <AuthIdentity onIdentity={setPlayerName} /> : null}
             {networkMessage ? <p className={styles.networkError}>{networkMessage}</p> : null}
             <div className={styles.homeActions}>
               <button className={styles.onlineButton} type="button" onClick={() => void startMatchmaking()}>
@@ -3186,8 +3167,12 @@ export default function FlickFootball({
                 <span><b>→</b><i>JOIN A FRIEND</i></span><small>ENTER CODE</small>
               </button>
             </div>
-            <button className={styles.practiceButton} type="button" onClick={startPractice}>PRACTICE ON THIS DEVICE</button>
           </div>
+          {authEnabled ? (
+            <div className={styles.landingAuth}>
+              <AuthIdentity onIdentity={setPlayerName} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
