@@ -3,10 +3,13 @@ export type Team = "mint" | "coral";
 export type FormationShape = "1-3-2" | "1-2-3" | "1-4-1" | "1-2-1-2";
 export type FormationStyle = "attacking" | "defensive";
 export type FormationId = `${FormationStyle}-${FormationShape}`;
+export type AttackingFormationId = `attacking-${FormationShape}`;
+export type DefensiveFormationId = `defensive-${FormationShape}`;
 
 export type PlayerSetup = {
   countryCode: string;
-  formation: FormationId;
+  attackingFormation: AttackingFormationId;
+  defensiveFormation: DefensiveFormationId;
 };
 
 export type FormationOption = {
@@ -55,12 +58,14 @@ const COUNTRY_CODE_SET = new Set<string>(COUNTRY_CODES);
 
 export const DEFAULT_PLAYER_SETUP: PlayerSetup = {
   countryCode: "IN",
-  formation: "attacking-1-3-2",
+  attackingFormation: "attacking-1-3-2",
+  defensiveFormation: "defensive-1-4-1",
 };
 
 export const BOT_PLAYER_SETUP: PlayerSetup = {
   countryCode: "BR",
-  formation: "attacking-1-3-2",
+  attackingFormation: "attacking-1-3-2",
+  defensiveFormation: "defensive-1-4-1",
 };
 
 export function isCountryCode(value: unknown): value is string {
@@ -69,6 +74,14 @@ export function isCountryCode(value: unknown): value is string {
 
 export function isFormationId(value: unknown): value is FormationId {
   return typeof value === "string" && FORMATION_IDS.has(value as FormationId);
+}
+
+export function isAttackingFormationId(value: unknown): value is AttackingFormationId {
+  return isFormationId(value) && value.startsWith("attacking-");
+}
+
+export function isDefensiveFormationId(value: unknown): value is DefensiveFormationId {
+  return isFormationId(value) && value.startsWith("defensive-");
 }
 
 export function countryFlagEmoji(countryCode: string): string {
@@ -86,4 +99,3 @@ export function countryName(countryCode: string): string {
   if (countryCode === "XK") return "Kosovo";
   return regionNames?.of(countryCode) ?? countryCode;
 }
-

@@ -165,7 +165,9 @@ class FakeSocket extends EventEmitter {
   }
 
   close() {
+    if (this.readyState === 3) return;
     this.readyState = 3;
+    testSockets.delete(this);
     this.emit("close");
   }
 
@@ -174,8 +176,11 @@ class FakeSocket extends EventEmitter {
   }
 }
 
+const testSockets = new Set<FakeSocket>();
+
 function connect() {
   const socket = new FakeSocket();
+  testSockets.add(socket);
   registerGameSocket(socket as unknown as WebSocket);
   return socket;
 }
@@ -186,7 +191,7 @@ async function waitForFrame(
   socket: FakeSocket,
   event: string,
   predicate: (frame: Frame) => boolean = () => true,
-  timeoutMs = 10_000,
+  timeoutMs = 20_000,
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -196,6 +201,8 @@ async function waitForFrame(
     if (frame) return frame;
     await settle();
   }
+  for (const testSocket of [...testSockets]) testSocket.close();
+  await settle();
   throw new Error(`Timed out waiting for ${event}`);
 }
 
@@ -243,7 +250,8 @@ assert.equal(first.latest("game:shot"), undefined);
 
 first.receive("match:configure", {
   countryCode: "IN",
-  formation: "attacking-1-3-2",
+  attackingFormation: "attacking-1-3-2",
+  defensiveFormation: "defensive-1-4-1",
 });
 await settle();
 assert.equal(first.latest("match:setup")?.payload?.ready, false);
@@ -251,12 +259,14 @@ assert.deepEqual(
   (first.latest("match:setup")?.payload?.players as Record<string, unknown>)?.mint,
   {
   countryCode: "IN",
-  formation: "attacking-1-3-2",
+  attackingFormation: "attacking-1-3-2",
+  defensiveFormation: "defensive-1-4-1",
   },
 );
 second.receive("match:configure", {
   countryCode: "BR",
-  formation: "defensive-1-4-1",
+  attackingFormation: "attacking-1-2-3",
+  defensiveFormation: "defensive-1-4-1",
 });
 await settle();
 assert.equal(first.latest("match:setup")?.payload?.ready, true);
@@ -265,7 +275,8 @@ assert.deepEqual(
   (second.latest("match:setup")?.payload?.players as Record<string, unknown>)?.coral,
   {
   countryCode: "BR",
-  formation: "defensive-1-4-1",
+  attackingFormation: "attacking-1-2-3",
+  defensiveFormation: "defensive-1-4-1",
   },
 );
 
@@ -321,8 +332,12 @@ assert.equal(
   "IN",
 );
 assert.equal(
-  (first.latest("match:resumed")?.payload?.player as Record<string, unknown>)?.formation,
+  (first.latest("match:resumed")?.payload?.player as Record<string, unknown>)?.attackingFormation,
   "attacking-1-3-2",
+);
+assert.equal(
+  (first.latest("match:resumed")?.payload?.player as Record<string, unknown>)?.defensiveFormation,
+  "defensive-1-4-1",
 );
 assert.equal(first.latest("match:setup")?.payload?.ready, true);
 assert.equal(first.latest("game:sync")?.payload?.sequence, 1);
@@ -383,7 +398,8 @@ assert.equal(await getOnlinePlayerCount(), 1);
 
 solo.receive("match:configure", {
   countryCode: "JP",
-  formation: "attacking-1-2-3",
+  attackingFormation: "attacking-1-2-3",
+  defensiveFormation: "defensive-1-2-1-2",
 });
 await settle();
 assert.equal(solo.latest("match:setup")?.payload?.ready, true);

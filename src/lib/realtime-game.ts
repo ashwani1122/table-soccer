@@ -3,8 +3,13 @@ import type Redis from "ioredis";
 import type { WebSocket } from "ws";
 import {
   BOT_PLAYER_SETUP,
+  DEFAULT_PLAYER_SETUP,
+  isAttackingFormationId,
   isCountryCode,
+  isDefensiveFormationId,
   isFormationId,
+  type AttackingFormationId,
+  type DefensiveFormationId,
   type FormationId,
   type PlayerSetup,
   type Team,
@@ -24,6 +29,9 @@ type Player = QueueEntry & {
   isBot: boolean;
   disconnectedAt: number | null;
   countryCode?: string;
+  attackingFormation?: AttackingFormationId;
+  defensiveFormation?: DefensiveFormationId;
+  // Kept only to recover matches created by the previous deployed schema.
   formation?: FormationId;
   lastChatAt?: number;
   lastReactionAt?: number;
@@ -396,19 +404,38 @@ function cleanRoomCode(value: unknown) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 }
 
+function playerSetup(player: Player): PlayerSetup | null {
+  if (!isCountryCode(player.countryCode)) return null;
+  const hasStoredFormation = isAttackingFormationId(player.attackingFormation) ||
+    isDefensiveFormationId(player.defensiveFormation) ||
+    isFormationId(player.formation);
+  if (!hasStoredFormation) return null;
+
+  const attackingFormation = isAttackingFormationId(player.attackingFormation)
+    ? player.attackingFormation
+    : isAttackingFormationId(player.formation)
+      ? player.formation
+      : DEFAULT_PLAYER_SETUP.attackingFormation;
+  const defensiveFormation = isDefensiveFormationId(player.defensiveFormation)
+    ? player.defensiveFormation
+    : isDefensiveFormationId(player.formation)
+      ? player.formation
+      : DEFAULT_PLAYER_SETUP.defensiveFormation;
+  return {
+    countryCode: player.countryCode.toUpperCase(),
+    attackingFormation,
+    defensiveFormation,
+  };
+}
+
 function publicPlayer(player: Player) {
+  const setup = playerSetup(player);
   return {
     name: player.name,
     team: player.team,
     isBot: player.isBot,
-    countryCode: player.countryCode,
-    formation: player.formation,
+    ...setup,
   };
-}
-
-function playerSetup(player: Player): PlayerSetup | null {
-  if (!isCountryCode(player.countryCode) || !isFormationId(player.formation)) return null;
-  return { countryCode: player.countryCode.toUpperCase(), formation: player.formation };
 }
 
 function roomSetupPayload(room: MatchRoom) {
@@ -967,14 +994,20 @@ async function handleEvent(state: GameState, socketId: string, event: string, pa
       const countryCode = typeof value.countryCode === "string"
         ? value.countryCode.toUpperCase()
         : value.countryCode;
-      if (!isCountryCode(countryCode) || !isFormationId(value.formation)) {
+      if (
+        !isCountryCode(countryCode) ||
+        !isAttackingFormationId(value.attackingFormation) ||
+        !isDefensiveFormationId(value.defensiveFormation)
+      ) {
         outbound.push(direct(socketId, "game:error", {
           message: "Choose a valid country and formation.",
         }));
         return outbound;
       }
       player.countryCode = countryCode;
-      player.formation = value.formation;
+      player.attackingFormation = value.attackingFormation;
+      player.defensiveFormation = value.defensiveFormation;
+      player.formation = undefined;
       const setup = roomSetupPayload(room);
       outbound.push(toMatch(room, "match:setup", setup));
       if (setup.ready) prepareBotTurn(room);

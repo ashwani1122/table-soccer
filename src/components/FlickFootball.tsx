@@ -24,6 +24,8 @@ import {
   FORMATION_OPTIONS,
   countryFlagEmoji,
   countryName,
+  type AttackingFormationId,
+  type DefensiveFormationId,
   type FormationId,
   type PlayerSetup,
   type Team,
@@ -133,8 +135,22 @@ type OnlineStage =
 type MatchInfo = {
   matchId: string;
   myTeam: Team;
-  player: { name: string; team: Team; isBot?: boolean; countryCode?: string; formation?: FormationId };
-  opponent: { name: string; team: Team; isBot?: boolean; countryCode?: string; formation?: FormationId };
+  player: {
+    name: string;
+    team: Team;
+    isBot?: boolean;
+    countryCode?: string;
+    attackingFormation?: AttackingFormationId;
+    defensiveFormation?: DefensiveFormationId;
+  };
+  opponent: {
+    name: string;
+    team: Team;
+    isBot?: boolean;
+    countryCode?: string;
+    attackingFormation?: AttackingFormationId;
+    defensiveFormation?: DefensiveFormationId;
+  };
   startsAt: number;
   setupReady?: boolean;
   roomCode?: string | null;
@@ -496,9 +512,18 @@ const FORMATION_POSITIONS: Record<FormationId, readonly (readonly [number, numbe
   "defensive-1-2-1-2": [[210, 650], [145, 610], [275, 610], [210, 560], [150, 510], [270, 510]],
 };
 
-function makeBodies(teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS): Body[] {
-  const mintPositions = FORMATION_POSITIONS[teamSetups.mint.formation];
-  const coralPositions = FORMATION_POSITIONS[teamSetups.coral.formation]
+function makeBodies(
+  teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS,
+  activeTeam: Team = "mint",
+): Body[] {
+  const mintFormation = activeTeam === "mint"
+    ? teamSetups.mint.attackingFormation
+    : teamSetups.mint.defensiveFormation;
+  const coralFormation = activeTeam === "coral"
+    ? teamSetups.coral.attackingFormation
+    : teamSetups.coral.defensiveFormation;
+  const mintPositions = FORMATION_POSITIONS[mintFormation];
+  const coralPositions = FORMATION_POSITIONS[coralFormation]
     .map(([x, y]) => [WIDTH - x, HEIGHT - y] as const);
   return [
     ...coralPositions.map(([x, y], index) => player(`coral-${index + 1}`, "coral", index + 1, x, y)),
@@ -517,10 +542,13 @@ function makeBodies(teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS): Body[] {
   ];
 }
 
-function makeGame(teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS): Game {
+function makeGame(
+  teamSetups: TeamSetups = DEFAULT_TEAM_SETUPS,
+  activeTeam: Team = "mint",
+): Game {
   return {
-    bodies: makeBodies(teamSetups),
-    activeTeam: "mint",
+    bodies: makeBodies(teamSetups, activeTeam),
+    activeTeam,
     phase: "ready",
     score: { mint: 0, coral: 0 },
     passChain: 0,
@@ -1460,7 +1488,7 @@ function drawGame(
 }
 
 function resetPositions(game: Game, kickoffTeam: Team, teamSetups: TeamSetups) {
-  game.bodies = makeBodies(teamSetups);
+  game.bodies = makeBodies(teamSetups, kickoffTeam);
   game.activeTeam = kickoffTeam;
   game.phase = "ready";
   game.passChain = 0;
@@ -1477,7 +1505,58 @@ function resetPositions(game: Game, kickoffTeam: Team, teamSetups: TeamSetups) {
   game.message = kickoffTeam === "mint" ? "NEON FC KICKOFF" : "EMBER KICKOFF";
 }
 
-function switchTurn(game: Game, reason = "TURN CHANGED") {
+function applyTurnFormations(game: Game, teamSetups: TeamSetups) {
+  const desiredPlayers = makeBodies(teamSetups, game.activeTeam)
+    .filter((body) => body.kind === "player");
+  const desiredById = new Map(desiredPlayers.map((body) => [body.id, body]));
+  const ball = game.bodies.find((body) => body.kind === "ball");
+  const placed: Body[] = [];
+
+  for (const body of game.bodies.filter((candidate) => candidate.kind === "player")) {
+    const desired = desiredById.get(body.id);
+    if (!desired) continue;
+    let position = { x: desired.x, y: desired.y };
+    let found = false;
+
+    // Formation points are already separated from one another. These nearby
+    // candidates only handle the rare case where the stationary ball occupies a
+    // destination when roles change.
+    for (const ring of [0, 38, 52, 68, 84]) {
+      const candidates = ring === 0 ? 1 : 16;
+      for (let index = 0; index < candidates; index += 1) {
+        const angle = (Math.PI * 2 * index) / candidates;
+        const x = clamp(
+          desired.x + Math.cos(angle) * ring,
+          FIELD.left + body.radius,
+          FIELD.right - body.radius,
+        );
+        const y = clamp(
+          desired.y + Math.sin(angle) * ring,
+          FIELD.top + body.radius,
+          FIELD.bottom - body.radius,
+        );
+        const clearsBall = !ball || Math.hypot(x - ball.x, y - ball.y) >=
+          body.radius + ball.radius + 4;
+        const clearsPlayers = placed.every((other) =>
+          Math.hypot(x - other.x, y - other.y) >= body.radius + other.radius + 3
+        );
+        if (!clearsBall || !clearsPlayers) continue;
+        position = { x, y };
+        found = true;
+        break;
+      }
+      if (found) break;
+    }
+
+    body.x = position.x;
+    body.y = position.y;
+    body.vx = 0;
+    body.vy = 0;
+    placed.push(body);
+  }
+}
+
+function switchTurn(game: Game, teamSetups: TeamSetups, reason = "TURN CHANGED") {
   game.activeTeam = game.activeTeam === "mint" ? "coral" : "mint";
   game.phase = "ready";
   game.passChain = 0;
@@ -1495,6 +1574,7 @@ function switchTurn(game: Game, reason = "TURN CHANGED") {
     body.vx = 0;
     body.vy = 0;
   }
+  applyTurnFormations(game, teamSetups);
 }
 
 function makeSnapshot(game: Game): GameSnapshot {
@@ -1592,7 +1672,10 @@ export default function FlickFootball({
   const [reactions, setReactions] = useState<GameReaction[]>([]);
   const [setupStage, setSetupStage] = useState<SetupStage>("ready");
   const [selectedCountry, setSelectedCountry] = useState(DEFAULT_PLAYER_SETUP.countryCode);
-  const [selectedFormation, setSelectedFormation] = useState<FormationId>(DEFAULT_PLAYER_SETUP.formation);
+  const [selectedAttackingFormation, setSelectedAttackingFormation] =
+    useState<AttackingFormationId>(DEFAULT_PLAYER_SETUP.attackingFormation);
+  const [selectedDefensiveFormation, setSelectedDefensiveFormation] =
+    useState<DefensiveFormationId>(DEFAULT_PLAYER_SETUP.defensiveFormation);
   const [countryQuery, setCountryQuery] = useState("");
   const [teamSetups, setTeamSetups] = useState<TeamSetups>({
     mint: { ...DEFAULT_TEAM_SETUPS.mint },
@@ -1695,20 +1778,32 @@ export default function FlickFootball({
       coral: { ...DEFAULT_TEAM_SETUPS.coral },
     };
     for (const participant of [data.player, data.opponent]) {
-      if (participant.countryCode && participant.formation) {
+      if (
+        participant.countryCode &&
+        participant.attackingFormation &&
+        participant.defensiveFormation
+      ) {
         next[participant.team] = {
           countryCode: participant.countryCode,
-          formation: participant.formation,
+          attackingFormation: participant.attackingFormation,
+          defensiveFormation: participant.defensiveFormation,
         };
       }
     }
     installTeamSetups(next);
-    const localSetup = data.player.countryCode && data.player.formation
-      ? { countryCode: data.player.countryCode, formation: data.player.formation }
+    const localSetup = data.player.countryCode &&
+      data.player.attackingFormation &&
+      data.player.defensiveFormation
+      ? {
+          countryCode: data.player.countryCode,
+          attackingFormation: data.player.attackingFormation,
+          defensiveFormation: data.player.defensiveFormation,
+        }
       : null;
     if (localSetup) {
       setSelectedCountry(localSetup.countryCode);
-      setSelectedFormation(localSetup.formation);
+      setSelectedAttackingFormation(localSetup.attackingFormation);
+      setSelectedDefensiveFormation(localSetup.defensiveFormation);
     }
     matchSetupReadyRef.current = data.setupReady === true;
     setSetupStage(data.setupReady === true ? "ready" : localSetup ? "waiting" : "country");
@@ -2130,7 +2225,8 @@ export default function FlickFootball({
   const confirmFormation = () => {
     const localSetup: PlayerSetup = {
       countryCode: selectedCountry,
-      formation: selectedFormation,
+      attackingFormation: selectedAttackingFormation,
+      defensiveFormation: selectedDefensiveFormation,
     };
     const localSetupTeam: Team = match?.myTeam ?? "mint";
     installTeamSetups({
@@ -2175,9 +2271,8 @@ export default function FlickFootball({
     canvas.height = HEIGHT * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const game = makeGame(teamSetupsRef.current);
+    const game = makeGame(teamSetupsRef.current, kickoffTeamRef.current);
     const viewTeam: Team = onlineStage === "matched" && match ? match.myTeam : "mint";
-    game.activeTeam = kickoffTeamRef.current;
     game.message = onlineStage === "matched"
       ? `${TEAM_META[game.activeTeam].name} STARTS`
       : "PULL BACK A DISC TO SHOOT";
@@ -2678,7 +2773,7 @@ export default function FlickFootball({
           game.message = `PASS ${game.passChain} COMPLETE — SHOOT THE BALL`;
           syncHud();
         } else {
-          switchTurn(game);
+          switchTurn(game, teamSetupsRef.current);
           sounds?.turn();
           syncHud();
         }
@@ -2698,7 +2793,7 @@ export default function FlickFootball({
       if (game.turnTime > 0) return;
 
       const authorityTeam = game.activeTeam;
-      switchTurn(game, "TIME'S UP");
+      switchTurn(game, teamSetupsRef.current, "TIME'S UP");
       sounds?.turn();
       syncHud();
       if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
@@ -3000,7 +3095,7 @@ export default function FlickFootball({
                 <div className={styles.setupHeading}>
                   <div>
                     <span>TEAM SETUP · 2 OF 2</span>
-                    <h2 id="setup-title">Select your formation</h2>
+                    <h2 id="setup-title">Select both formations</h2>
                   </div>
                   <b>{countryFlagEmoji(selectedCountry)}</b>
                 </div>
@@ -3012,31 +3107,42 @@ export default function FlickFootball({
                         <small>{style === "attacking" ? "More players forward" : "Protect your goal"}</small>
                       </div>
                       <div className={styles.formationGrid}>
-                        {FORMATION_OPTIONS.filter((option) => option.style === style).map((option) => (
-                          <button
-                            type="button"
-                            data-selected={selectedFormation === option.id}
-                            aria-pressed={selectedFormation === option.id}
-                            key={option.id}
-                            onClick={() => setSelectedFormation(option.id)}
-                          >
-                            <span className={styles.miniPitch} aria-hidden="true">
-                              <i className={styles.miniGoal} />
-                              <i className={styles.miniHalfway} />
-                              {FORMATION_POSITIONS[option.id].map(([x, y], index) => (
-                                <i
-                                  className={styles.miniDisc}
-                                  key={`${option.id}-${index}`}
-                                  style={{
-                                    left: `${8 + ((x - 60) / 300) * 84}%`,
-                                    top: `${8 + ((y - 430) / 230) * 80}%`,
-                                  }}
-                                />
-                              ))}
-                            </span>
-                            <strong>{option.label}</strong>
-                          </button>
-                        ))}
+                        {FORMATION_OPTIONS.filter((option) => option.style === style).map((option) => {
+                          const selected = style === "attacking"
+                            ? selectedAttackingFormation === option.id
+                            : selectedDefensiveFormation === option.id;
+                          return (
+                            <button
+                              type="button"
+                              data-selected={selected}
+                              aria-pressed={selected}
+                              key={option.id}
+                              onClick={() => {
+                                if (style === "attacking") {
+                                  setSelectedAttackingFormation(option.id as AttackingFormationId);
+                                } else {
+                                  setSelectedDefensiveFormation(option.id as DefensiveFormationId);
+                                }
+                              }}
+                            >
+                              <span className={styles.miniPitch} aria-hidden="true">
+                                <i className={styles.miniGoal} />
+                                <i className={styles.miniHalfway} />
+                                {FORMATION_POSITIONS[option.id].map(([x, y], index) => (
+                                  <i
+                                    className={styles.miniDisc}
+                                    key={`${option.id}-${index}`}
+                                    style={{
+                                      left: `${8 + ((x - 60) / 300) * 84}%`,
+                                      top: `${8 + ((y - 430) / 230) * 80}%`,
+                                    }}
+                                  />
+                                ))}
+                              </span>
+                              <strong>{option.label}</strong>
+                            </button>
+                          );
+                        })}
                       </div>
                     </section>
                   ))}
@@ -3054,7 +3160,8 @@ export default function FlickFootball({
                 <h2 id="setup-title">Waiting for opponent</h2>
                 <div className={styles.waitingSelection}>
                   <span>{countryName(selectedCountry)}</span>
-                  <strong>{FORMATION_OPTIONS.find((option) => option.id === selectedFormation)?.style.toUpperCase()} · {FORMATION_OPTIONS.find((option) => option.id === selectedFormation)?.label}</strong>
+                  <strong>ATTACK · {FORMATION_OPTIONS.find((option) => option.id === selectedAttackingFormation)?.label}</strong>
+                  <strong>DEFENCE · {FORMATION_OPTIONS.find((option) => option.id === selectedDefensiveFormation)?.label}</strong>
                 </div>
                 <small>The match begins automatically when both teams confirm.</small>
               </div>
