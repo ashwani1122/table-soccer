@@ -1505,58 +1505,7 @@ function resetPositions(game: Game, kickoffTeam: Team, teamSetups: TeamSetups) {
   game.message = kickoffTeam === "mint" ? "NEON FC KICKOFF" : "EMBER KICKOFF";
 }
 
-function applyTurnFormations(game: Game, teamSetups: TeamSetups) {
-  const desiredPlayers = makeBodies(teamSetups, game.activeTeam)
-    .filter((body) => body.kind === "player");
-  const desiredById = new Map(desiredPlayers.map((body) => [body.id, body]));
-  const ball = game.bodies.find((body) => body.kind === "ball");
-  const placed: Body[] = [];
-
-  for (const body of game.bodies.filter((candidate) => candidate.kind === "player")) {
-    const desired = desiredById.get(body.id);
-    if (!desired) continue;
-    let position = { x: desired.x, y: desired.y };
-    let found = false;
-
-    // Formation points are already separated from one another. These nearby
-    // candidates only handle the rare case where the stationary ball occupies a
-    // destination when roles change.
-    for (const ring of [0, 38, 52, 68, 84]) {
-      const candidates = ring === 0 ? 1 : 16;
-      for (let index = 0; index < candidates; index += 1) {
-        const angle = (Math.PI * 2 * index) / candidates;
-        const x = clamp(
-          desired.x + Math.cos(angle) * ring,
-          FIELD.left + body.radius,
-          FIELD.right - body.radius,
-        );
-        const y = clamp(
-          desired.y + Math.sin(angle) * ring,
-          FIELD.top + body.radius,
-          FIELD.bottom - body.radius,
-        );
-        const clearsBall = !ball || Math.hypot(x - ball.x, y - ball.y) >=
-          body.radius + ball.radius + 4;
-        const clearsPlayers = placed.every((other) =>
-          Math.hypot(x - other.x, y - other.y) >= body.radius + other.radius + 3
-        );
-        if (!clearsBall || !clearsPlayers) continue;
-        position = { x, y };
-        found = true;
-        break;
-      }
-      if (found) break;
-    }
-
-    body.x = position.x;
-    body.y = position.y;
-    body.vx = 0;
-    body.vy = 0;
-    placed.push(body);
-  }
-}
-
-function switchTurn(game: Game, teamSetups: TeamSetups, reason = "TURN CHANGED") {
+function switchTurn(game: Game, reason = "TURN CHANGED") {
   game.activeTeam = game.activeTeam === "mint" ? "coral" : "mint";
   game.phase = "ready";
   game.passChain = 0;
@@ -1574,7 +1523,6 @@ function switchTurn(game: Game, teamSetups: TeamSetups, reason = "TURN CHANGED")
     body.vx = 0;
     body.vy = 0;
   }
-  applyTurnFormations(game, teamSetups);
 }
 
 function makeSnapshot(game: Game): GameSnapshot {
@@ -2773,7 +2721,7 @@ export default function FlickFootball({
           game.message = `PASS ${game.passChain} COMPLETE — SHOOT THE BALL`;
           syncHud();
         } else {
-          switchTurn(game, teamSetupsRef.current);
+          switchTurn(game);
           sounds?.turn();
           syncHud();
         }
@@ -2793,7 +2741,7 @@ export default function FlickFootball({
       if (game.turnTime > 0) return;
 
       const authorityTeam = game.activeTeam;
-      switchTurn(game, teamSetupsRef.current, "TIME'S UP");
+      switchTurn(game, "TIME'S UP");
       sounds?.turn();
       syncHud();
       if (onlineStage === "matched" && canPublishTurn(authorityTeam)) publishState();
