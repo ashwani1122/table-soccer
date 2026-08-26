@@ -1361,19 +1361,19 @@ function drawPlayer(
   ctx.fillRect(-body.radius, -body.radius, body.radius * 2, body.radius * 2);
   const flagImage = getCountryFlagImage(countryCode);
   if (flagImage?.complete && flagImage.naturalWidth > 0) {
-    const sourceSize = Math.min(flagImage.naturalWidth, flagImage.naturalHeight);
-    const sourceX = (flagImage.naturalWidth - sourceSize) / 2;
-    const sourceY = (flagImage.naturalHeight - sourceSize) / 2;
+    const flagAspect = flagImage.naturalWidth / flagImage.naturalHeight;
+    const flagHalfHeight = (faceRadius * 0.94) / Math.sqrt(flagAspect ** 2 + 1);
+    const flagHalfWidth = flagHalfHeight * flagAspect;
     ctx.drawImage(
       flagImage,
-      sourceX,
-      sourceY,
-      sourceSize,
-      sourceSize,
-      -faceRadius,
-      -faceRadius,
-      faceRadius * 2,
-      faceRadius * 2,
+      0,
+      0,
+      flagImage.naturalWidth,
+      flagImage.naturalHeight,
+      -flagHalfWidth,
+      -flagHalfHeight,
+      flagHalfWidth * 2,
+      flagHalfHeight * 2,
     );
   } else {
     ctx.fillStyle = meta.primary;
