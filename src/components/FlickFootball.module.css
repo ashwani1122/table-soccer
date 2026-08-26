@@ -84,6 +84,20 @@
   color: #fff;
   font-size: 0.68rem;
   font-weight: 900;
+  overflow: hidden;
+}
+
+.countryFlag {
+  display: inline-block;
+  flex: 0 0 auto;
+  background-color: #e8efec;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  color: #183128;
+  font-size: 0.52rem;
+  font-weight: 950;
+  line-height: 1;
 }
 
 .mintAvatar {
@@ -308,6 +322,14 @@
   background: radial-gradient(circle at 35% 25%, #34483f, #0b1611 70%);
   box-shadow: 0 7px 18px rgba(0, 0, 0, 0.4);
   font-size: 1.45rem;
+  overflow: hidden;
+}
+
+.setupHeading > b .countryFlag,
+.waitingBadge .countryFlag {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
 }
 
 .countrySearch {
@@ -375,9 +397,11 @@
   box-shadow: 0 0 0 2px rgba(83, 220, 167, 0.11) inset;
 }
 
-.countryGrid button > span {
-  font-size: 1.55rem;
-  line-height: 1;
+.countryGrid button > .countryFlag {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 50%;
   filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.45));
 }
 
@@ -409,12 +433,21 @@
 }
 
 .setupFooter div > strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   color: #eaf5f0;
   font-size: 0.66rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inlineCountryFlag {
+  width: 19px;
+  height: 19px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 50%;
 }
 
 .setupFooter > button {
@@ -582,6 +615,7 @@
   background: radial-gradient(circle at 35% 25%, #314a3e, #08110d 70%);
   box-shadow: 0 0 0 9px rgba(80, 223, 169, 0.08), 0 18px 35px rgba(0, 0, 0, 0.45);
   font-size: 2.65rem;
+  overflow: hidden;
 }
 
 .waitingPulse {

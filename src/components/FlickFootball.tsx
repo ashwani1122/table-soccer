@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { countryFlagDataUrl } from "@/lib/country-flags";
 import {
   advanceFixedPhysicsClock,
   advanceBallOrientation,
@@ -22,7 +23,6 @@ import {
   COUNTRY_CODES,
   DEFAULT_PLAYER_SETUP,
   FORMATION_OPTIONS,
-  countryFlagEmoji,
   countryName,
   type AttackingFormationId,
   type DefensiveFormationId,
@@ -66,10 +66,38 @@ const RESULT_HOME_DELAY = 3_000;
 const AIM_BROADCAST_MS = 60;
 const TURF_TRAIL_MIN_SPEED = 210;
 const COLLISION_SOLVER_PASSES = 4;
+const countryFlagImages = new Map<string, HTMLImageElement>();
 
 type Phase = "ready" | "moving" | "goal" | "finished";
 type SetupStage = "country" | "formation" | "waiting" | "ready";
 type TeamSetups = Record<Team, PlayerSetup>;
+
+function CountryFlag({ countryCode, className }: { countryCode: string; className?: string }) {
+  const flagUrl = countryFlagDataUrl(countryCode);
+  return (
+    <span
+      aria-hidden="true"
+      className={`${styles.countryFlag}${className ? ` ${className}` : ""}`}
+      style={flagUrl ? { backgroundImage: `url("${flagUrl}")` } : undefined}
+    >
+      {flagUrl ? null : countryCode.toUpperCase()}
+    </span>
+  );
+}
+
+function getCountryFlagImage(countryCode: string) {
+  const code = countryCode.toUpperCase();
+  const cached = countryFlagImages.get(code);
+  if (cached) return cached;
+  const source = countryFlagDataUrl(code);
+  if (!source) return null;
+
+  const image = new Image();
+  image.decoding = "async";
+  image.src = source;
+  countryFlagImages.set(code, image);
+  return image;
+}
 
 type Body = {
   id: string;
@@ -1331,13 +1359,29 @@ function drawPlayer(
   // the complete top surface instead of a small badge in the middle.
   ctx.fillStyle = "#f7faf8";
   ctx.fillRect(-body.radius, -body.radius, body.radius * 2, body.radius * 2);
-  ctx.save();
-  ctx.scale(1.08, 1.18);
-  ctx.font = `${body.radius * 2.55}px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(countryFlagEmoji(countryCode), 0, 0.4);
-  ctx.restore();
+  const flagImage = getCountryFlagImage(countryCode);
+  if (flagImage?.complete && flagImage.naturalWidth > 0) {
+    const sourceSize = Math.min(flagImage.naturalWidth, flagImage.naturalHeight);
+    const sourceX = (flagImage.naturalWidth - sourceSize) / 2;
+    const sourceY = (flagImage.naturalHeight - sourceSize) / 2;
+    ctx.drawImage(
+      flagImage,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      -faceRadius,
+      -faceRadius,
+      faceRadius * 2,
+      faceRadius * 2,
+    );
+  } else {
+    ctx.fillStyle = meta.primary;
+    ctx.font = `900 ${body.radius * 0.72}px Arial, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(countryCode.toUpperCase(), 0, 0.4);
+  }
 
   const faceLight = ctx.createRadialGradient(
     -body.radius * 0.42,
@@ -2878,7 +2922,7 @@ export default function FlickFootball({
         </button>
 
         <div className={styles.playerIdentity}>
-          <span className={`${styles.avatar} ${styles.mintAvatar}`}>{countryFlagEmoji(teamSetups.mint.countryCode)}</span>
+          <CountryFlag countryCode={teamSetups.mint.countryCode} className={`${styles.avatar} ${styles.mintAvatar}`} />
           <span className={styles.playerName}>{mintName}</span>
         </div>
 
@@ -2895,7 +2939,7 @@ export default function FlickFootball({
 
         <div className={`${styles.playerIdentity} ${styles.playerIdentityRight}`}>
           <span className={styles.playerName}>{coralName}</span>
-          <span className={`${styles.avatar} ${styles.coralAvatar}`}>{countryFlagEmoji(teamSetups.coral.countryCode)}</span>
+          <CountryFlag countryCode={teamSetups.coral.countryCode} className={`${styles.avatar} ${styles.coralAvatar}`} />
         </div>
 
         <button
@@ -3027,7 +3071,7 @@ export default function FlickFootball({
                     <span>TEAM SETUP · 1 OF 2</span>
                     <h2 id="setup-title">Select your country</h2>
                   </div>
-                  <b>{countryFlagEmoji(selectedCountry)}</b>
+                  <b><CountryFlag countryCode={selectedCountry} /></b>
                 </div>
                 <label className={styles.countrySearch}>
                   <span className={styles.srOnly}>Search countries</span>
@@ -3056,7 +3100,7 @@ export default function FlickFootball({
                       }}
                       title={countryName(countryCode)}
                     >
-                      <span>{countryFlagEmoji(countryCode)}</span>
+                      <CountryFlag countryCode={countryCode} />
                       <small>{countryName(countryCode)}</small>
                     </button>
                   ))}
@@ -3064,7 +3108,7 @@ export default function FlickFootball({
                 <div className={styles.setupFooter}>
                   <div>
                     <span>SELECTED TEAM</span>
-                    <strong>{countryFlagEmoji(selectedCountry)} {countryName(selectedCountry)}</strong>
+                    <strong><CountryFlag countryCode={selectedCountry} className={styles.inlineCountryFlag} /> {countryName(selectedCountry)}</strong>
                   </div>
                   <button type="button" onClick={() => setSetupStage("formation")}>CONTINUE <span>→</span></button>
                 </div>
@@ -3076,7 +3120,7 @@ export default function FlickFootball({
                     <span>TEAM SETUP · 2 OF 2</span>
                     <h2 id="setup-title">Select both formations</h2>
                   </div>
-                  <b>{countryFlagEmoji(selectedCountry)}</b>
+                  <b><CountryFlag countryCode={selectedCountry} /></b>
                 </div>
                 <div className={styles.formationScroll}>
                   {(["attacking", "defensive"] as const).map((style) => (
@@ -3133,7 +3177,7 @@ export default function FlickFootball({
               </>
             ) : (
               <div className={styles.setupWaiting}>
-                <div className={styles.waitingBadge}>{countryFlagEmoji(selectedCountry)}</div>
+                <div className={styles.waitingBadge}><CountryFlag countryCode={selectedCountry} /></div>
                 <span className={styles.waitingPulse} aria-hidden="true" />
                 <p>YOUR TEAM IS READY</p>
                 <h2 id="setup-title">Waiting for opponent</h2>
