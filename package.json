@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "next dev",
     "dev:realtime": "npx --yes vercel@latest dev",
+    "dev:cloudflare": "wrangler dev --config realtime-worker/wrangler.jsonc --port 8787",
+    "deploy:cloudflare": "wrangler deploy --config realtime-worker/wrangler.jsonc",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:realtime": "node --experimental-strip-types scripts/realtime-smoke.mts"
+    "test:realtime": "node --experimental-strip-types scripts/realtime-smoke.mts",
+    "test:cloudflare": "node --experimental-strip-types scripts/cloudflare-realtime-smoke.mts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.8.0",
@@ -25,8 +28,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
+    "@cloudflare/workers-types": "latest",
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "latest"
   }
 }

@@ -9,6 +9,20 @@ const CLIENT_ID_KEY = "flickxi:client-id";
 const MAX_PENDING_EVENTS = 24;
 const MAX_RECONNECT_DELAY = 3_000;
 
+function realtimeSocketUrl() {
+  const configured = process.env.NEXT_PUBLIC_REALTIME_URL?.trim();
+  if (!configured) {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${window.location.host}/api/ws`;
+  }
+
+  const url = new URL(configured);
+  if (url.protocol === "https:") url.protocol = "wss:";
+  if (url.protocol === "http:") url.protocol = "ws:";
+  if (url.pathname === "/" || url.pathname === "") url.pathname = "/ws";
+  return url.toString();
+}
+
 function getClientId() {
   const existing = window.sessionStorage.getItem(CLIENT_ID_KEY);
   if (existing) return existing;
@@ -57,8 +71,7 @@ export class RealtimeClient {
     if (this.socket && this.socket.readyState < WebSocket.CLOSING) return this;
 
     this.manuallyClosed = false;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+    const socket = new WebSocket(realtimeSocketUrl());
     this.socket = socket;
 
     socket.addEventListener("open", () => {

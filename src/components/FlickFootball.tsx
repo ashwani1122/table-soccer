@@ -1391,29 +1391,37 @@ function drawPlayer(
 
 function drawAim(ctx: CanvasRenderingContext2D, drag: Drag, body: Body, possessionBall?: Body) {
   const power = drag.pull / MAX_PULL;
-  const frontX = body.x + drag.dirX * (body.radius + 9);
-  const frontY = body.y + drag.dirY * (body.radius + 9);
+  const frontX = body.x + drag.dirX * (body.radius + 15);
+  const frontY = body.y + drag.dirY * (body.radius + 15);
   const length = 42 + power * 62;
+  const tipX = frontX + drag.dirX * length;
+  const tipY = frontY + drag.dirY * length;
+  const perpendicularX = -drag.dirY;
+  const perpendicularY = drag.dirX;
+  const shaftHalfWidth = 3.25;
+  const headHalfWidth = 11;
+  const headLength = 16;
+  const shoulderX = tipX - drag.dirX * headLength;
+  const shoulderY = tipY - drag.dirY * headLength;
 
   ctx.save();
   ctx.lineCap = "round";
-  ctx.strokeStyle = power > 0.72 ? "#ffda64" : "#f4fbff";
-  ctx.fillStyle = ctx.strokeStyle;
-  ctx.lineWidth = 4;
+  ctx.lineJoin = "round";
+  ctx.fillStyle = "#ffffff";
+  ctx.shadowColor = "rgba(4, 17, 11, 0.5)";
+  ctx.shadowBlur = 5;
+  ctx.shadowOffsetY = 2;
   ctx.beginPath();
-  ctx.moveTo(frontX, frontY);
-  ctx.lineTo(frontX + drag.dirX * length, frontY + drag.dirY * length);
-  ctx.stroke();
-
-  const tipX = frontX + drag.dirX * length;
-  const tipY = frontY + drag.dirY * length;
-  const angle = Math.atan2(drag.dirY, drag.dirX);
-  ctx.beginPath();
-  ctx.moveTo(tipX, tipY);
-  ctx.lineTo(tipX - Math.cos(angle - 0.55) * 13, tipY - Math.sin(angle - 0.55) * 13);
-  ctx.lineTo(tipX - Math.cos(angle + 0.55) * 13, tipY - Math.sin(angle + 0.55) * 13);
+  ctx.moveTo(frontX + perpendicularX * shaftHalfWidth, frontY + perpendicularY * shaftHalfWidth);
+  ctx.lineTo(shoulderX + perpendicularX * shaftHalfWidth, shoulderY + perpendicularY * shaftHalfWidth);
+  ctx.lineTo(shoulderX + perpendicularX * headHalfWidth, shoulderY + perpendicularY * headHalfWidth);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineTo(shoulderX - perpendicularX * headHalfWidth, shoulderY - perpendicularY * headHalfWidth);
+  ctx.lineTo(shoulderX - perpendicularX * shaftHalfWidth, shoulderY - perpendicularY * shaftHalfWidth);
+  ctx.lineTo(frontX - perpendicularX * shaftHalfWidth, frontY - perpendicularY * shaftHalfWidth);
   ctx.closePath();
   ctx.fill();
+  ctx.shadowColor = "transparent";
 
   ctx.strokeStyle = "rgba(255,255,255,0.3)";
   ctx.lineWidth = 2;

@@ -1,35 +1,44 @@
 # FlickXI Table Soccer
 
-FlickXI is a mobile-first, two-player table-soccer game built entirely with Next.js. The UI and physics run in the browser, while `/api/ws` handles matchmaking, private rooms, turns, shots, chat, emoji reactions, synchronization, and rematches over WebSockets.
+FlickXI is a mobile-first, two-player table-soccer game. The Next.js UI and physics run in the browser, while a Cloudflare Durable Object handles matchmaking, private rooms, turns, shots, chat, emoji reactions, bots, synchronization, rematches, and reconnect recovery over WebSockets.
 
 ## Local development
 
-The WebSocket upgrade API requires the Vercel runtime. Run the complete realtime game with:
+Install dependencies, then run the Cloudflare realtime service and Next.js app in separate terminals:
 
 ```bash
-npm run dev:realtime
+npm install
+npm run dev:cloudflare
 ```
 
-Then open [http://localhost:3000](http://localhost:3000) in two browser windows.
-
-For UI-only work, the normal Next.js development server is still available:
-
 ```bash
+$env:NEXT_PUBLIC_REALTIME_URL="http://127.0.0.1:8787/ws"
 npm run dev
 ```
 
-The `/api/ws` connection does not work under plain `next dev`.
+Then open [http://localhost:3000](http://localhost:3000) in two browser windows. The Cloudflare protocol smoke test can be run while Wrangler is running:
+
+```bash
+npm run test:cloudflare
+```
 
 ## Production
 
 ```bash
 npm run lint
 npm run build
+npm run deploy:cloudflare
 ```
 
-Deploy the repository directly to Vercel. No separate Node.js, Render, or Koyeb service is used.
+Copy the deployed `workers.dev` URL and add it to Vercel as a Production environment variable, including the `/ws` path:
 
-For reliable matchmaking across multiple Vercel Function instances, add an Upstash Redis integration to the Vercel project. It supplies the required `REDIS_URL`. Without it, the game intentionally falls back to single-instance in-memory state for local protocol tests.
+```env
+NEXT_PUBLIC_REALTIME_URL=https://flickxi-realtime.your-account.workers.dev/ws
+```
+
+Redeploy the Vercel project after adding the variable. The app's `/api/presence` route automatically proxies the Worker's `/presence` endpoint.
+
+`REDIS_URL` and the existing `/api/ws` implementation remain only as a legacy local fallback when `NEXT_PUBLIC_REALTIME_URL` is absent; production does not need Upstash Redis.
 
 ## Optional Google sign-in
 

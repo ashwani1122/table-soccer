@@ -1,0 +1,26 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "flickxi-realtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-26",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GAME_HUB",
+        "class_name": "GameHub"
+      }
+    ]
+  },
+  "exports": {
+    "GameHub": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://table-soccer-beta.vercel.app,http://localhost:3000,http://127.0.0.1:3000"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
