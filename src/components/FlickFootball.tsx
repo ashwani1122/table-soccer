@@ -2194,9 +2194,8 @@ export default function FlickFootball({
     if (!text || onlineStage !== "matched" || !match || match.opponent.isBot) return;
     socketRef.current?.emit("chat:send", { text });
     setChatInput("");
-    chatOpenRef.current = false;
-    setChatOpen(false);
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    chatOpenRef.current = true;
+    setChatOpen(true);
   };
 
   const sendReaction = (emoji: string) => {
@@ -3000,9 +2999,7 @@ export default function FlickFootball({
                   <small>TAP TABLE TO CLOSE</small>
                 </div>
                 <div className={styles.chatMessages} ref={chatListRef} aria-live="polite">
-                  {chatMessages.length === 0 ? (
-                    <p className={styles.emptyChat}>Say hello to your opponent.</p>
-                  ) : chatMessages.map((message) => {
+                  {chatMessages.map((message) => {
                     const mine = message.senderTeam === localTeam;
                     return (
                       <div className={styles.chatMessage} data-mine={mine} key={message.id}>

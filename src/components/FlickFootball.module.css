@@ -724,13 +724,13 @@
 }
 
 .reactionBurst[data-local="true"] {
-  right: 18%;
-  bottom: 20%;
+  bottom: 14px;
+  left: 12px;
 }
 
 .reactionBurst[data-local="false"] {
-  top: 18%;
-  left: 18%;
+  right: 12px;
+  bottom: 14px;
 }
 
 .tableChatFeed {
@@ -782,11 +782,12 @@
 .chatPanel {
   position: absolute;
   z-index: 14;
+  top: 8px;
   right: 8px;
   bottom: 8px;
   width: calc(100% - 16px);
-  height: min(44%, 260px);
-  min-height: 190px;
+  height: auto;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -833,19 +834,13 @@
 }
 
 .chatMessages {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 11px 10px;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-.emptyChat {
-  margin: auto;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 0.74rem;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
 }
 
 .chatMessage {
